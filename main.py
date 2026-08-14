@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from workflows.certificados_icbf.service import run_service_demo
+from app.main_window import run_app
 
 
 if __name__ == "__main__":
-    run_service_demo()
+    run_app()

@@ -16,6 +16,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
+from reportlab.lib.utils import ImageReader
 
 
 OUTPUT_COLUMNS = [
@@ -470,7 +471,11 @@ def _fit_text(pdf: canvas.Canvas, text: object, max_width: float, font: str, siz
     return candidate
 
 
-def _build_pdf_bytes(frame: pd.DataFrame, rows_per_page: int = DEFAULT_ROWS_PER_PAGE) -> bytes:
+def _build_pdf_bytes(
+    frame: pd.DataFrame,
+    rows_per_page: int = DEFAULT_ROWS_PER_PAGE,
+    logo_path: str | Path | None = None,
+) -> bytes:
     """Create a PDF from a validated set of records.
 
     Renders one or more pages into a BytesIO buffer, with a table header and
@@ -484,13 +489,37 @@ def _build_pdf_bytes(frame: pd.DataFrame, rows_per_page: int = DEFAULT_ROWS_PER_
         regular_font, bold_font = _register_font()
 
         left = 25
-        top = page_height - 32
+        logo = None
+        logo_width = 0.0
+        logo_height = 0.0
+        if logo_path:
+            logo_file = Path(logo_path)
+            if logo_file.is_file():
+                logo = ImageReader(str(logo_file))
+                source_width, source_height = logo.getSize()
+                max_width, max_height = 120.0, 48.0
+                scale = min(max_width / source_width, max_height / source_height)
+                logo_width = source_width * scale
+                logo_height = source_height * scale
+
+        top = page_height - (logo_height + 45 if logo else 32)
         header_height = 34
         footer_margin = 20
         widths = [22, 65, 68, 65, 68, 74, 74, 109]
         headers = OUTPUT_COLUMNS
 
         for page_number, page_rows in enumerate(pages, start=1):
+            if logo:
+                pdf.drawImage(
+                    logo,
+                    page_width - left - logo_width,
+                    page_height - 20 - logo_height,
+                    width=logo_width,
+                    height=logo_height,
+                    preserveAspectRatio=True,
+                    mask="auto",
+                )
+
             rows_count = len(page_rows)
             available_height = top - footer_margin - header_height
             row_height = min(19.0, max(7.0, available_height / max(rows_count, 1)))
@@ -549,12 +578,24 @@ def _build_pdf_bytes(frame: pd.DataFrame, rows_per_page: int = DEFAULT_ROWS_PER_
         raise RuntimeError(f"No se pudo generar el PDF: {error}") from error
 
 
-def generate_pdf(records: pd.DataFrame, rows_per_page: int = DEFAULT_ROWS_PER_PAGE) -> bytes:
+def generate_pdf(
+    records: pd.DataFrame,
+    rows_per_page: int = DEFAULT_ROWS_PER_PAGE,
+    logo_path: str | Path | None = None,
+) -> bytes:
     """Generate a single PDF file containing all validated records."""
-    return _build_pdf_bytes(final_records(records), rows_per_page=rows_per_page)
+    return _build_pdf_bytes(
+        final_records(records),
+        rows_per_page=rows_per_page,
+        logo_path=logo_path,
+    )
 
 
-def generate_pdf_zip_by_unit(records: pd.DataFrame, rows_per_page: int = DEFAULT_ROWS_PER_PAGE) -> bytes:
+def generate_pdf_zip_by_unit(
+    records: pd.DataFrame,
+    rows_per_page: int = DEFAULT_ROWS_PER_PAGE,
+    logo_path: str | Path | None = None,
+) -> bytes:
     """Generate a ZIP archive of separate PDFs, one per UNIDADES group."""
     try:
         frame = final_records(records)
@@ -565,7 +606,11 @@ def generate_pdf_zip_by_unit(records: pd.DataFrame, rows_per_page: int = DEFAULT
                 if not unit_label:
                     unit_label = "unidad"
                 unit_frame = group.reset_index(drop=True)
-                pdf_bytes = _build_pdf_bytes(unit_frame, rows_per_page=rows_per_page)
+                pdf_bytes = _build_pdf_bytes(
+                    unit_frame,
+                    rows_per_page=rows_per_page,
+                    logo_path=logo_path,
+                )
                 archive.writestr(f"{unit_label}.pdf", pdf_bytes)
 
         buffer.seek(0)
@@ -603,8 +648,12 @@ def validation_summary(records: pd.DataFrame) -> dict[str, int | bool]:
     """Return a compact summary of validation metrics for the UI dashboard."""
     validation = validate_records(records)
     units = validation["active"]["UNIDADES"].map(lambda value: "NA" if is_missing(value) else value)
+    problem_indexes = set(validation["invalid_document"].index)
+    problem_indexes.update(validation["duplicates"].index)
+    problem_indexes.update(validation["missing_report"].index)
     return {
         "registros_activos": len(validation["active"]),
+        "registros_validos": len(validation["active"]) - len(problem_indexes),
         "documentos_faltantes": len(validation["missing_document"]),
         "documentos_invalidos": len(validation["invalid_document"]),
         "filas_duplicadas": len(validation["duplicates"]),

@@ -1,6 +1,6 @@
 [project]
 name = "automatizacion-mundial"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Aplicación de escritorio modular con lógica heredada migrada desde Streamlit"
 requires-python = ">=3.11"
 dependencies = [
@@ -14,3 +14,6 @@ dependencies = [
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+
+[tool.setuptools.dynamic]
+version = {attr = "version.APP_VERSION"}
