@@ -36,6 +36,8 @@ class ReviewSession:
         validation_input = self._records.copy(deep=True)
         validation_input["INCLUIR"] = True
         validation = validate_records(validation_input)
+        self._duplicates_report = validation["duplicates"].copy(deep=True)
+        self._missing_report = validation["missing_report"].copy(deep=True)
         self._invalid_indexes = set(validation["invalid_document"].index)
         self._missing_document_indexes = set(validation["missing_document"].index)
         index_by_source_row = {
@@ -66,6 +68,15 @@ class ReviewSession:
             raise IndexError("La fila seleccionada no existe.")
         self._records.iat[row, self._records.columns.get_loc("INCLUIR")] = bool(included)
         return self.snapshot()
+
+    def report_frame(self, report_type: str) -> pd.DataFrame:
+        reports = {
+            "duplicates": self._duplicates_report,
+            "missing": self._missing_report,
+        }
+        if report_type not in reports:
+            raise ValueError(f"Tipo de reporte desconocido: {report_type}")
+        return reports[report_type].copy(deep=True)
 
     def snapshot(self) -> dict[str, Any]:
         included_indexes = {
@@ -121,6 +132,8 @@ class ReviewSession:
             "blocking": bool(problem_indexes),
             "total_procesado": len(self._records),
             "no_seleccionados": len(self._records) - selected,
+            "reporte_duplicados": len(self._duplicates_report),
+            "reporte_faltantes": len(self._missing_report),
         }
         ready = selected > 0 and not summary["blocking"]
         return {
@@ -147,7 +160,7 @@ class CertificadosIcbfService:
     def final_records(self, records):
         return final_records(records)
 
-    def generate_pdf(self, records, rows_per_page=25, logo_path: str | Path | None = None):
+    def generate_pdf(self, records, rows_per_page=70, logo_path: str | Path | None = None):
         self._ensure_ready(records)
         logo = Path(logo_path) if logo_path else self.logo_path
         if not logo.exists():
@@ -189,26 +202,29 @@ class CertificadosIcbfService:
 
     def output_availability(self, records: pd.DataFrame) -> dict[str, Any]:
         validation = validate_records(records)
+        report_session = self.create_review_session(records)
         selected = len(validation["active"])
         ready = selected > 0 and not bool(validation["blocking"])
         return {
             "ready": ready,
             "selected": selected,
-            "duplicates": len(validation["duplicates"]),
-            "missing": len(validation["missing_report"]),
+            "duplicates": len(report_session.report_frame("duplicates")),
+            "missing": len(report_session.report_frame("missing")),
             "email_text": build_email_text(records),
         }
 
-    def generate_duplicates_report(self, records: pd.DataFrame) -> bytes:
-        duplicates = validate_records(records)["duplicates"]
+    def generate_duplicates_report(self, records: pd.DataFrame | ReviewSession) -> bytes:
+        session = records if isinstance(records, ReviewSession) else self.create_review_session(records)
+        duplicates = session.report_frame("duplicates")
         if duplicates.empty:
-            raise ValueError("No hay documentos duplicados incluidos para reportar.")
+            raise ValueError("No hay documentos duplicados en el archivo procesado para reportar.")
         return dataframe_to_excel_bytes({"Duplicados": duplicates})
 
-    def generate_missing_fields_report(self, records: pd.DataFrame) -> bytes:
-        missing = validate_records(records)["missing_report"]
+    def generate_missing_fields_report(self, records: pd.DataFrame | ReviewSession) -> bytes:
+        session = records if isinstance(records, ReviewSession) else self.create_review_session(records)
+        missing = session.report_frame("missing")
         if missing.empty:
-            raise ValueError("No hay campos obligatorios faltantes incluidos para reportar.")
+            raise ValueError("No hay campos obligatorios faltantes en el archivo procesado para reportar.")
         return dataframe_to_excel_bytes({"Campos faltantes": missing})
 
     def suggested_filename(

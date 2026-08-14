@@ -512,7 +512,7 @@ def _build_pdf_bytes(
             if logo:
                 pdf.drawImage(
                     logo,
-                    page_width - left - logo_width,
+                    left,
                     page_height - 20 - logo_height,
                     width=logo_width,
                     height=logo_height,

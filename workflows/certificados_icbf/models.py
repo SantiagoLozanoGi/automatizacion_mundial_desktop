@@ -35,6 +35,10 @@ class RecordsTableModel(QtCore.QAbstractTableModel):
     def review(self) -> dict[str, Any]:
         return self._review
 
+    @property
+    def review_session(self):
+        return self._session
+
     def rowCount(self, parent: QtCore.QModelIndex = QtCore.QModelIndex()) -> int:
         return 0 if parent.isValid() else len(self._records)
 

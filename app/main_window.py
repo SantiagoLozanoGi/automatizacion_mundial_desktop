@@ -26,6 +26,7 @@ class HomeView(QtWidgets.QWidget):
 
         title = QtWidgets.QLabel("Automatización de Procesos – Mundial de Seguros")
         title.setAlignment(QtCore.Qt.AlignCenter)
+        title.setWordWrap(True)
         title.setStyleSheet("font-size: 24px; font-weight: 600;")
         layout.addWidget(title)
         version = QtWidgets.QLabel(f"Versión {APP_VERSION}")

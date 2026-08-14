@@ -10,6 +10,7 @@ from pypdf import PdfReader
 
 from workflows.certificados_icbf.service import CertificadosIcbfService
 from app.file_io import save_bytes_to_file
+from reportlab.pdfgen import canvas
 
 
 def build_source() -> BytesIO:
@@ -150,7 +151,7 @@ def test_review_session_reuses_validation_and_revalidates_business_edits(monkeyp
     assert "invalid" in refreshed["rows"][0]["categories"]
 
 
-def test_service_generates_anomaly_reports_for_included_records() -> None:
+def test_service_preserves_anomaly_reports_independently_of_selection() -> None:
     workflow_service = CertificadosIcbfService()
     records, _ = workflow_service.read_and_clean_excel(build_source())
     records.loc[1, "DOCUMENTO"] = records.loc[0, "DOCUMENTO"]
@@ -173,13 +174,31 @@ def test_service_generates_anomaly_reports_for_included_records() -> None:
     assert missing_book["Campos faltantes"].max_row == 2
 
     records.loc[1, "INCLUIR"] = False
-    assert workflow_service.output_availability(records)["duplicates"] == 0
-    try:
-        workflow_service.generate_duplicates_report(records)
-    except ValueError as error:
-        assert "No hay" in str(error)
-    else:
-        raise AssertionError("No se debía generar un reporte vacío.")
+    preserved = workflow_service.generate_duplicates_report(records)
+    preserved_book = load_workbook(BytesIO(preserved), read_only=True)
+    assert workflow_service.output_availability(records)["duplicates"] == 2
+    assert preserved_book["Duplicados"].max_row == 3
+
+
+def test_missing_report_keeps_excluded_anomaly_but_ignores_valid_excluded_row() -> None:
+    workflow_service = CertificadosIcbfService()
+    records, _ = workflow_service.read_and_clean_excel(build_source())
+    records.loc[1, "UNIDADES"] = ""
+    session = workflow_service.create_review_session(records)
+
+    included_report = workflow_service.generate_missing_fields_report(session)
+    session.set_included(1, False)
+    excluded_report = workflow_service.generate_missing_fields_report(session)
+    session.set_included(0, False)
+    valid_excluded_report = workflow_service.generate_missing_fields_report(session)
+
+    for content in (included_report, excluded_report, valid_excluded_report):
+        workbook = load_workbook(BytesIO(content), read_only=True)
+        sheet = workbook["Campos faltantes"]
+        assert sheet.max_row == 2
+        source_rows = [row[8] for row in sheet.iter_rows(values_only=True)]
+        assert int(records.loc[1, "_FILA_ORIGEN"]) in source_rows
+        assert int(records.loc[0, "_FILA_ORIGEN"]) not in source_rows
 
 
 def test_service_output_names_and_file_writer(tmp_path) -> None:
@@ -232,3 +251,36 @@ def test_certificate_outputs_respect_include_selection() -> None:
     assert "Luis" not in pdf_text
     with zipfile.ZipFile(BytesIO(archive)) as zipped:
         assert zipped.namelist() == ["Bogotá.pdf"]
+
+
+def test_service_default_pdf_fits_seventy_rows_and_places_logo_left(monkeypatch) -> None:
+    workflow_service = CertificadosIcbfService()
+    records = pd.DataFrame(
+        [
+            {
+                "INCLUIR": True,
+                "PRIMER NOMBRE": f"Nombre {index}",
+                "SEGUNDO NOMBRE": "NA",
+                "PRIMER APELLIDO": "Apellido",
+                "SEGUNDO APELLIDO": "NA",
+                "DOCUMENTO": str(index + 1).zfill(10),
+                "FECHA DE NACIMIENTO": "01/01/2010",
+                "UNIDADES": "UNIDAD ÚNICA",
+                "_FILA_ORIGEN": index + 2,
+            }
+            for index in range(70)
+        ]
+    )
+    positions = []
+    original_draw_image = canvas.Canvas.drawImage
+
+    def capture_draw_image(pdf_canvas, image, x, y, *args, **kwargs):
+        positions.append((x, y, kwargs["width"], kwargs["height"]))
+        return original_draw_image(pdf_canvas, image, x, y, *args, **kwargs)
+
+    monkeypatch.setattr(canvas.Canvas, "drawImage", capture_draw_image)
+    pdf = workflow_service.generate_pdf(records)
+
+    assert len(PdfReader(BytesIO(pdf)).pages) == 1
+    assert positions and positions[0][0] == 25
+    assert positions[0][2] / positions[0][3] > 1

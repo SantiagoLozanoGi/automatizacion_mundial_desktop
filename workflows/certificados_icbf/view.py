@@ -109,8 +109,11 @@ class CertificadosIcbfView(QtWidgets.QWidget):
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
         self._build_summary(layout)
-        self._build_review_area(layout)
-        self._build_outputs(layout)
+        self.workspace = QtWidgets.QTabWidget()
+        self.workspace.setVisible(False)
+        layout.addWidget(self.workspace, 1)
+        self._build_review_area()
+        self._build_outputs()
 
     def _build_summary(self, parent_layout: QtWidgets.QVBoxLayout) -> None:
         self.summary_group = QtWidgets.QGroupBox("Resumen de validación")
@@ -135,7 +138,7 @@ class CertificadosIcbfView(QtWidgets.QWidget):
         self.summary_group.setVisible(False)
         parent_layout.addWidget(self.summary_group)
 
-    def _build_review_area(self, parent_layout: QtWidgets.QVBoxLayout) -> None:
+    def _build_review_area(self) -> None:
         self.review_widget = QtWidgets.QWidget()
         review_layout = QtWidgets.QVBoxLayout(self.review_widget)
         review_layout.setContentsMargins(0, 0, 0, 0)
@@ -160,10 +163,22 @@ class CertificadosIcbfView(QtWidgets.QWidget):
             "QTableView::item:selected { background: #2563eb; color: #ffffff; }"
             "QHeaderView::section { background: #e2e8f0; color: #0f172a; "
             "font-weight: 600; padding: 5px; border: 1px solid #cbd5e1; }"
+            "QScrollBar:vertical { background: #e5e7eb; width: 15px; margin: 0; }"
+            "QScrollBar::handle:vertical { background: #64748b; min-height: 32px; "
+            "border-radius: 6px; margin: 2px; }"
+            "QScrollBar::handle:vertical:hover { background: #334155; }"
+            "QScrollBar:horizontal { background: #e5e7eb; height: 15px; margin: 0; }"
+            "QScrollBar::handle:horizontal { background: #64748b; min-width: 32px; "
+            "border-radius: 6px; margin: 2px; }"
+            "QScrollBar::handle:horizontal:hover { background: #334155; }"
+            "QScrollBar::add-line, QScrollBar::sub-line { width: 0; height: 0; }"
         )
         self.table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
         self.table.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
-        self.table.setSortingEnabled(True)
+        self.table.setSortingEnabled(False)
+        self.table.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding
+        )
         self.table.verticalHeader().setVisible(False)
         self.table.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Interactive)
         self.table.horizontalHeader().setDefaultSectionSize(145)
@@ -177,7 +192,9 @@ class CertificadosIcbfView(QtWidgets.QWidget):
         self.detail.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
         detail_layout.addWidget(self.detail)
         splitter.addWidget(detail_group)
-        splitter.setSizes([360, 100])
+        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(1, 0)
+        splitter.setSizes([520, 90])
         review_layout.addWidget(splitter, 1)
 
         footer = QtWidgets.QHBoxLayout()
@@ -192,10 +209,9 @@ class CertificadosIcbfView(QtWidgets.QWidget):
         self.blocking_reason = QtWidgets.QLabel()
         self.blocking_reason.setWordWrap(True)
         review_layout.addWidget(self.blocking_reason)
-        self.review_widget.setVisible(False)
-        parent_layout.addWidget(self.review_widget, 1)
+        self.workspace.addTab(self.review_widget, "2. Revisar registros")
 
-    def _build_outputs(self, parent_layout: QtWidgets.QVBoxLayout) -> None:
+    def _build_outputs(self) -> None:
         self.outputs_group = QtWidgets.QGroupBox("3. Generar archivos")
         output_layout = QtWidgets.QVBoxLayout(self.outputs_group)
         self.stage_label = QtWidgets.QLabel(
@@ -235,8 +251,7 @@ class CertificadosIcbfView(QtWidgets.QWidget):
         self.generation_status = QtWidgets.QLabel()
         self.generation_status.setWordWrap(True)
         output_layout.addWidget(self.generation_status)
-        self.outputs_group.setVisible(False)
-        parent_layout.addWidget(self.outputs_group)
+        self.workspace.addTab(self.outputs_group, "3. Generar archivos")
 
     @QtCore.Slot()
     def _select_file(self) -> None:
@@ -254,8 +269,7 @@ class CertificadosIcbfView(QtWidgets.QWidget):
         self.process_button.setEnabled(True)
         self.status.setText("Archivo listo para procesar.")
         self.summary_group.setVisible(False)
-        self.review_widget.setVisible(False)
-        self.outputs_group.setVisible(False)
+        self.workspace.setVisible(False)
 
     @QtCore.Slot()
     def _process_file(self) -> None:
@@ -289,8 +303,8 @@ class CertificadosIcbfView(QtWidgets.QWidget):
         self.table.setColumnWidth(1, 72)
         self.filter_combo.setCurrentIndex(0)
         self.summary_group.setVisible(True)
-        self.review_widget.setVisible(True)
-        self.outputs_group.setVisible(True)
+        self.workspace.setVisible(True)
+        self.workspace.setCurrentWidget(self.review_widget)
         self.email_text.setPlainText(email_text or service.build_email_text(records))
         self._email_is_current = True
         self._review_changed(self.table_model.review)
@@ -326,8 +340,8 @@ class CertificadosIcbfView(QtWidgets.QWidget):
         )
         self.pdf_button.setEnabled(bool(review["ready"]) and self._output_thread is None)
         self.zip_button.setEnabled(bool(review["ready"]) and self._output_thread is None)
-        self.duplicates_button.setEnabled(bool(summary["filas_duplicadas"]))
-        self.missing_button.setEnabled(bool(summary["campos_informativos"]))
+        self.duplicates_button.setEnabled(bool(summary["reporte_duplicados"]))
+        self.missing_button.setEnabled(bool(summary["reporte_faltantes"]))
         if self._email_is_current and self.records is not None:
             self._email_is_current = self.records.equals(self.table_model.records)
         if not self._email_is_current:
@@ -365,6 +379,7 @@ class CertificadosIcbfView(QtWidgets.QWidget):
 
     @QtCore.Slot()
     def _continue_to_generation(self) -> None:
+        self.workspace.setCurrentWidget(self.outputs_group)
         self.outputs_group.setFocus(QtCore.Qt.OtherFocusReason)
         self.generation_status.setText("Los datos están listos. Selecciona una salida para generarla.")
 
@@ -416,9 +431,9 @@ class CertificadosIcbfView(QtWidgets.QWidget):
             return
         try:
             if report_type == "duplicates":
-                content = service.generate_duplicates_report(self.table_model.records)
+                content = service.generate_duplicates_report(self.table_model.review_session)
             else:
-                content = service.generate_missing_fields_report(self.table_model.records)
+                content = service.generate_missing_fields_report(self.table_model.review_session)
             self._request_save(content, report_type)
         except Exception as error:
             self.generation_status.setText(f"Detalle técnico: {error}")

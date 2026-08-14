@@ -128,6 +128,31 @@ def test_city_group_not_split_when_it_fits():
     assert {row["UNIDADES"] for row in pages[1]} == {"B"}
 
 
+def test_pagination_keeps_next_unit_whole_at_seventy_capacity():
+    frame = pd.DataFrame([
+        {"N°": index + 1, "UNIDADES": "A" if index < 55 else "B"}
+        for index in range(75)
+    ])
+
+    pages = _paginate(frame, rows_per_page=70)
+
+    assert [len(page) for page in pages] == [55, 20]
+    assert {row["UNIDADES"] for row in pages[0]} == {"A"}
+    assert {row["UNIDADES"] for row in pages[1]} == {"B"}
+
+
+def test_pagination_splits_only_unit_larger_than_capacity():
+    frame = pd.DataFrame([
+        {"N°": index + 1, "UNIDADES": "UNIDAD GRANDE"}
+        for index in range(85)
+    ])
+
+    pages = _paginate(frame, rows_per_page=70)
+
+    assert [len(page) for page in pages] == [70, 15]
+    assert all({row["UNIDADES"] for row in page} == {"UNIDAD GRANDE"} for page in pages)
+
+
 def test_invalid_excel_file_raises_clear_error():
     invalid_bytes = BytesIO(b"esto no es un archivo excel")
     try:

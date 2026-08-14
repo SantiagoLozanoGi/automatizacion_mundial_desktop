@@ -44,6 +44,37 @@ def test_model_changes_include_and_preserves_all_source_rows() -> None:
     assert model.review["ready"] is True
 
 
+def test_include_is_reversible_through_proxy_without_losing_data_or_anomalies() -> None:
+    model = build_duplicate_model()
+    proxy = RecordsFilterProxyModel()
+    proxy.setSourceModel(model)
+    proxy.set_category("all")
+    include_column = model._columns.index("INCLUIR")
+    source_row = 0
+    original = model.records.loc[source_row].drop(labels=["INCLUIR"]).to_dict()
+    original_anomalies = model.anomalies_for_row(source_row)
+
+    proxy_row = next(
+        row for row in range(proxy.rowCount())
+        if proxy.mapToSource(proxy.index(row, 0)).row() == source_row
+    )
+    checkbox = proxy.index(proxy_row, include_column)
+    assert proxy.setData(checkbox, QtCore.Qt.Unchecked, QtCore.Qt.CheckStateRole)
+    assert bool(model.records.loc[source_row, "INCLUIR"]) is False
+    assert proxy.rowCount() == 2
+
+    proxy.set_category("excluded")
+    checkbox = proxy.index(0, include_column)
+    assert proxy.mapToSource(checkbox).row() == source_row
+    assert proxy.setData(checkbox, QtCore.Qt.Checked, QtCore.Qt.CheckStateRole)
+
+    assert bool(model.records.loc[source_row, "INCLUIR"]) is True
+    assert model.records.loc[source_row].drop(labels=["INCLUIR"]).to_dict() == original
+    assert model.anomalies_for_row(source_row) == original_anomalies
+    proxy.set_category("all")
+    assert proxy.rowCount() == 2
+
+
 def test_proxy_filters_without_removing_records() -> None:
     model = build_duplicate_model()
     proxy = RecordsFilterProxyModel()

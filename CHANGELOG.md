@@ -2,6 +2,24 @@
 
 Todos los cambios relevantes de la aplicación se documentarán en este archivo.
 
+## [0.4.0] - 2026-08-14
+
+### Cambiado
+
+- Logo de certificados ubicado en la esquina superior izquierda de todas las páginas.
+- PDF general configurado para una capacidad objetivo de hasta 70 registros por página.
+- Paginación conserva unidades completas cuando caben y divide solo unidades mayores a la capacidad.
+- Área de revisión y generación reorganizada en pestañas para priorizar la tabla de registros.
+- Tabla y panel de detalle usan distribución flexible y crecen con la ventana.
+- Pantalla de inicio adaptada a resoluciones estándar mediante un título responsive.
+
+### Corregido
+
+- Selección `INCLUIR` reversible y estable en la vista `Todos`, sin saltos por ordenamiento automático.
+- Reportes de anomalías conservan la evidencia original independientemente de `INCLUIR`.
+- Readiness y certificados continúan considerando únicamente los registros incluidos.
+- Scrollbars vertical y horizontal con contraste y tamaño explícitos para el tema claro.
+
 ## [0.3.0] - 2026-08-13
 
 ### Añadido
