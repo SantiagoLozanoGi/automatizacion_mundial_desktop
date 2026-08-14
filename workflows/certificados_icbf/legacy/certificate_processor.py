@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from io import BytesIO
+from math import isfinite
+from numbers import Real
 import os
 import re
 import unicodedata
@@ -11,6 +13,7 @@ from pathlib import Path
 import pandas as pd
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.utils.datetime import from_excel
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfbase import pdfmetrics
@@ -266,6 +269,13 @@ def format_date(value: object) -> str:
         return ""
     if isinstance(value, (datetime, date, pd.Timestamp)):
         return value.strftime("%d/%m/%Y")
+    if isinstance(value, Real) and not isinstance(value, bool):
+        serial = float(value)
+        if isfinite(serial) and 1 <= serial <= 2_958_465:
+            try:
+                return from_excel(serial).strftime("%d/%m/%Y")
+            except (OverflowError, ValueError):
+                pass
     text = _text(value)
     parsed = pd.to_datetime(text, errors="coerce", dayfirst=True)
     if pd.notna(parsed):

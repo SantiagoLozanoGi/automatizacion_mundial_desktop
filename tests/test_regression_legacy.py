@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from datetime import datetime
 from io import BytesIO
+import zipfile
 
 import pandas as pd
 
@@ -10,11 +12,53 @@ from workflows.certificados_icbf.legacy.certificate_processor import (
     InputFormatError,
     _paginate,
     final_records,
+    format_date,
     generate_pdf,
     generate_pdf_zip_by_unit,
     read_and_clean_excel,
     validate_records,
 )
+
+
+def test_format_date_converts_excel_serials() -> None:
+    assert format_date(46213) == "10/07/2026"
+    assert format_date(46221) == "18/07/2026"
+
+
+def test_format_date_preserves_supported_date_inputs() -> None:
+    assert format_date("10/07/2026") == "10/07/2026"
+    assert format_date("10-07-2026") == "10/07/2026"
+    assert format_date(datetime(2026, 7, 10)) == "10/07/2026"
+    assert format_date(pd.Timestamp("2026-07-18")) == "18/07/2026"
+
+
+def test_format_date_preserves_missing_and_impossible_values() -> None:
+    assert format_date(None) == ""
+    assert format_date("") == ""
+    assert format_date("NA") == "NA"
+    assert format_date(0) == "0"
+    assert format_date(-5) == "-5"
+    assert format_date(999_999_999) == "999999999"
+
+
+def test_excel_serial_date_reaches_dataframe_pdf_and_zip_normalized() -> None:
+    source = build_source([
+        ["Ana", None, "Díaz", None, "123", 46213, "Bogotá", "INGRESO"],
+    ])
+    records, _ = read_and_clean_excel(source)
+
+    assert records.loc[0, "FECHA DE NACIMIENTO"] == "10/07/2026"
+    pdf_text = "\n".join(
+        page.extract_text() or "" for page in PdfReader(BytesIO(generate_pdf(records))).pages
+    )
+    with zipfile.ZipFile(BytesIO(generate_pdf_zip_by_unit(records))) as archive:
+        zipped_pdf = archive.read(archive.namelist()[0])
+    zip_text = "\n".join(
+        page.extract_text() or "" for page in PdfReader(BytesIO(zipped_pdf)).pages
+    )
+
+    assert "10/07/2026" in pdf_text
+    assert "10/07/2026" in zip_text
 
 
 def build_source(rows):
