@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="64" fill="#0f172a"/>
+  <circle cx="256" cy="256" r="150" fill="#38bdf8" opacity="0.9"/>
+  <path d="M180 318 L256 170 L332 318" fill="none" stroke="#f8fafc" stroke-width="22" stroke-linejoin="round"/>
+  <path d="M210 272 H302" stroke="#f8fafc" stroke-width="18" stroke-linecap="round"/>
+  <text x="256" y="390" text-anchor="middle" font-size="42" font-family="Arial, sans-serif" fill="#f8fafc">MUNDIAL</text>
+</svg>

@@ -1,0 +1,16 @@
+[project]
+name = "automatizacion-mundial"
+version = "0.1.0"
+description = "Aplicación de escritorio modular con lógica heredada migrada desde Streamlit"
+requires-python = ">=3.11"
+dependencies = [
+    "pandas",
+    "openpyxl",
+    "reportlab",
+    "pypdf",
+    "PySide6",
+    "pytest",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
