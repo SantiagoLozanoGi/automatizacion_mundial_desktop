@@ -114,3 +114,114 @@ def test_model_uses_explicit_readable_foreground_and_background() -> None:
     assert foreground.color().name() == "#0f172a"
     assert isinstance(background, QtGui.QBrush)
     assert background.color().lightness() > foreground.color().lightness()
+
+
+def editable_records() -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "INCLUIR": True,
+                "PRIMER NOMBRE": "Ana",
+                "SEGUNDO NOMBRE": "NA",
+                "PRIMER APELLIDO": "NA",
+                "SEGUNDO APELLIDO": "NA",
+                "DOCUMENTO": "NA",
+                "FECHA DE NACIMIENTO": "01/01/2010",
+                "UNIDADES": "Bogotá",
+                "_FILA_ORIGEN": 21,
+            },
+            {
+                "INCLUIR": True,
+                "PRIMER NOMBRE": "Luis",
+                "SEGUNDO NOMBRE": "NA",
+                "PRIMER APELLIDO": "Pérez",
+                "SEGUNDO APELLIDO": "NA",
+                "DOCUMENTO": "0000000456",
+                "FECHA DE NACIMIENTO": "02/02/2011",
+                "UNIDADES": "Cali",
+                "_FILA_ORIGEN": 22,
+            },
+        ]
+    )
+
+
+def edit(model: RecordsTableModel, row: int, column: str, value: str) -> bool:
+    return model.setData(
+        model.index(row, model._columns.index(column)), value, QtCore.Qt.EditRole
+    )
+
+
+def test_only_authorized_business_fields_are_editable() -> None:
+    model = RecordsTableModel(editable_records())
+
+    for column in ("DOCUMENTO", "PRIMER APELLIDO", "SEGUNDO APELLIDO"):
+        assert model.flags(model.index(0, model._columns.index(column))) & QtCore.Qt.ItemIsEditable
+    for column in ("PRIMER NOMBRE", "SEGUNDO NOMBRE", "FECHA DE NACIMIENTO", "UNIDADES", "_FILA_ORIGEN"):
+        assert not model.flags(model.index(0, model._columns.index(column))) & QtCore.Qt.ItemIsEditable
+        assert not edit(model, 0, column, "cambio no autorizado")
+
+
+def test_valid_document_and_first_surname_edits_clear_anomalies() -> None:
+    model = RecordsTableModel(editable_records())
+
+    assert edit(model, 0, "DOCUMENTO", "789")
+    assert model.records.loc[0, "DOCUMENTO"] == "0000000789"
+    assert "invalid" not in model.categories_for_row(0)
+    assert edit(model, 0, "PRIMER APELLIDO", "GÓMEZ")
+
+    assert model.anomalies_for_row(0) == []
+    assert model.review["rows"][0]["status"] == "Válido"
+    assert model.review["ready"] is True
+    assert model.records.loc[0, "_FILA_ORIGEN"] == 21
+
+
+def test_invalid_document_edit_remains_invalid() -> None:
+    records = editable_records()
+    records.loc[0, "PRIMER APELLIDO"] = "Gómez"
+    model = RecordsTableModel(records)
+
+    assert edit(model, 0, "DOCUMENTO", "ABC-123")
+
+    assert model.records.loc[0, "DOCUMENTO"] == "ABC-123"
+    assert "invalid" in model.categories_for_row(0)
+    assert model.review["ready"] is False
+
+
+def test_document_edit_detects_new_duplicate() -> None:
+    records = editable_records()
+    records.loc[0, "PRIMER APELLIDO"] = "Gómez"
+    model = RecordsTableModel(records)
+
+    assert edit(model, 0, "DOCUMENTO", "456")
+
+    assert model.records.loc[0, "DOCUMENTO"] == "0000000456"
+    assert "duplicates" in model.categories_for_row(0)
+    assert "duplicates" in model.categories_for_row(1)
+    assert model.review["summary"]["filas_duplicadas"] == 2
+
+
+def test_second_surname_is_editable_but_remains_optional() -> None:
+    records = editable_records()
+    records.loc[0, "DOCUMENTO"] = "0000000789"
+    records.loc[0, "PRIMER APELLIDO"] = "Gómez"
+    model = RecordsTableModel(records)
+    before = model.review["ready"]
+
+    assert edit(model, 0, "SEGUNDO APELLIDO", "Ruiz")
+
+    assert model.records.loc[0, "SEGUNDO APELLIDO"] == "Ruiz"
+    assert model.review["ready"] is before is True
+
+
+def test_edit_while_excluded_persists_after_reinclusion() -> None:
+    model = RecordsTableModel(editable_records())
+    include = model._columns.index("INCLUIR")
+    assert model.setData(model.index(0, include), QtCore.Qt.Unchecked, QtCore.Qt.CheckStateRole)
+
+    assert edit(model, 0, "DOCUMENTO", "789")
+    assert edit(model, 0, "PRIMER APELLIDO", "Gómez")
+    assert model.setData(model.index(0, include), QtCore.Qt.Checked, QtCore.Qt.CheckStateRole)
+
+    assert model.records.loc[0, "DOCUMENTO"] == "0000000789"
+    assert model.records.loc[0, "PRIMER APELLIDO"] == "Gómez"
+    assert model.review["rows"][0]["status"] == "Válido"

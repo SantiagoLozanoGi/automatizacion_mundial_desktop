@@ -206,6 +206,13 @@ class CertificadosIcbfView(QtWidgets.QWidget):
         filter_row.addWidget(self.visible_count)
         filter_row.addStretch()
         review_layout.addLayout(filter_row)
+        edit_help = QtWidgets.QLabel(
+            "Campos editables: documento, primer apellido y segundo apellido. "
+            "Haz doble clic sobre una celda para corregirla."
+        )
+        edit_help.setWordWrap(True)
+        edit_help.setStyleSheet("color: #475569; background: #eff6ff; padding: 7px;")
+        review_layout.addWidget(edit_help)
 
         splitter = QtWidgets.QSplitter(QtCore.Qt.Vertical)
         self.table = QtWidgets.QTableView()

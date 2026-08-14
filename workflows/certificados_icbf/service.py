@@ -7,6 +7,7 @@ from typing import Any
 
 import pandas as pd
 
+from app.logging_config import get_logger
 from config.resources import CORPORATE_LOGO_PATH
 from workflows.certificados_icbf.legacy.certificate_processor import (
     build_email_text,
@@ -15,10 +16,20 @@ from workflows.certificados_icbf.legacy.certificate_processor import (
     generate_pdf,
     generate_pdf_zip_by_unit,
     is_missing,
+    normalize_edited_records,
     read_and_clean_excel,
     validate_records,
     validation_summary,
 )
+
+
+EDITABLE_FIELDS = frozenset({"DOCUMENTO", "PRIMER APELLIDO", "SEGUNDO APELLIDO"})
+_LOG_FIELD_NAMES = {
+    "DOCUMENTO": "document",
+    "PRIMER APELLIDO": "first_surname",
+    "SEGUNDO APELLIDO": "second_surname",
+}
+logger = get_logger("certificados_icbf")
 
 
 class ReviewSession:
@@ -192,6 +203,27 @@ class CertificadosIcbfService:
         updated = records.copy(deep=True)
         updated.iat[row, updated.columns.get_loc("INCLUIR")] = bool(included)
         return updated
+
+    def update_editable_field(
+        self, records: pd.DataFrame, row: int, field: str, value: object
+    ) -> pd.DataFrame:
+        """Update and normalize one authorized field in a working copy."""
+        if field not in EDITABLE_FIELDS:
+            raise ValueError(f"El campo no admite edición manual: {field}")
+        if field not in records.columns:
+            raise KeyError(f"El conjunto de registros no contiene la columna {field}.")
+        if not 0 <= row < len(records):
+            raise IndexError("La fila seleccionada no existe.")
+        updated = records.copy(deep=True).reset_index(drop=True)
+        source_row = updated.iloc[row]["_FILA_ORIGEN"]
+        updated.iat[row, updated.columns.get_loc(field)] = value
+        normalized = normalize_edited_records(updated)
+        logger.info(
+            "workflow=certificados_icbf action=manual_edit field=%s source_row=%s",
+            _LOG_FIELD_NAMES[field],
+            source_row,
+        )
+        return normalized
 
     def review_records(self, records: pd.DataFrame) -> dict[str, Any]:
         """Prepare row-level validation information for the review interface."""

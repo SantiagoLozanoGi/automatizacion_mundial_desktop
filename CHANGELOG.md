@@ -11,6 +11,8 @@ Todos los cambios relevantes de la aplicación se documentarán en este archivo.
 - Creación diferida y reutilización de vistas durante la sesión.
 - Manejo recuperable de errores al inicializar un workflow.
 - Guía para agregar workflows futuros sin introducir módulos ficticios.
+- Edición manual de documento, primer apellido y segundo apellido desde la tabla ICBF,
+  con normalización, revalidación inmediata y trazabilidad sin datos personales.
 
 ### Cambiado
 

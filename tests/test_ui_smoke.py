@@ -7,7 +7,7 @@ import pandas as pd
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6 import QtGui, QtWidgets
+from PySide6 import QtCore, QtGui, QtWidgets
 
 from app.main_window import MainWindow
 from workflows.certificados_icbf.view import CertificadosIcbfView, ExcelProcessorWorker
@@ -102,6 +102,25 @@ def test_generation_error_keeps_processed_state(monkeypatch) -> None:
 
     assert view.table_model.records.equals(original)
     assert "conservaron" in view.generation_status.text()
+    view.close()
+
+
+def test_manual_table_edit_refreshes_workflow_status_and_summary() -> None:
+    application()
+    view = CertificadosIcbfView()
+    records = processed_records()
+    records.loc[0, "DOCUMENTO"] = "NA"
+    view._show_results(records, {"recibidos": 1, "ingresos": 1, "excluidos": 0}, "correo")
+    document_column = view.table_model._columns.index("DOCUMENTO")
+
+    assert view.table_model.setData(
+        view.table_model.index(0, document_column), "123", QtCore.Qt.EditRole
+    )
+
+    assert view.table_model.records.loc[0, "DOCUMENTO"] == "0000000123"
+    assert "Listo para generaci" in view.workflow_status.text()
+    assert view.metrics["invalidos"].text() == "0"
+    assert view.pdf_button.isEnabled()
     view.close()
 
 

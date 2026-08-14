@@ -5,6 +5,7 @@ from datetime import date
 import zipfile
 
 import pandas as pd
+import pytest
 from openpyxl import load_workbook
 from pypdf import PdfReader
 
@@ -251,6 +252,46 @@ def test_certificate_outputs_respect_include_selection() -> None:
     assert "Luis" not in pdf_text
     with zipfile.ZipFile(BytesIO(archive)) as zipped:
         assert zipped.namelist() == ["Bogotá.pdf"]
+
+
+def test_manual_edits_feed_reports_pdf_and_zip_without_changing_source(monkeypatch) -> None:
+    workflow_service = CertificadosIcbfService()
+    records, _ = workflow_service.read_and_clean_excel(build_source())
+    records.loc[0, "DOCUMENTO"] = "NA"
+    records.loc[0, "PRIMER APELLIDO"] = "NA"
+    records.loc[0, "SEGUNDO APELLIDO"] = "NA"
+    original = records.copy(deep=True)
+    logged = []
+    monkeypatch.setattr(
+        "workflows.certificados_icbf.service.logger.info",
+        lambda message, *args: logged.append((message, args)),
+    )
+    assert workflow_service.output_availability(records)["missing"] == 1
+
+    corrected = workflow_service.update_editable_field(records, 0, "DOCUMENTO", "789")
+    corrected = workflow_service.update_editable_field(
+        corrected, 0, "PRIMER APELLIDO", "CORREGIDO"
+    )
+    assert workflow_service.output_availability(corrected)["missing"] == 0
+    with pytest.raises(ValueError, match="No hay campos"):
+        workflow_service.generate_missing_fields_report(corrected)
+
+    pdf = workflow_service.generate_pdf(corrected)
+    archive = workflow_service.generate_pdf_zip_by_unit(corrected)
+    pdf_text = "\n".join(page.extract_text() or "" for page in PdfReader(BytesIO(pdf)).pages)
+    with zipfile.ZipFile(BytesIO(archive)) as zipped:
+        zipped_pdf = zipped.read(zipped.namelist()[0])
+    zip_text = "\n".join(
+        page.extract_text() or "" for page in PdfReader(BytesIO(zipped_pdf)).pages
+    )
+
+    assert "0000000789" in pdf_text and "CORREGIDO" in pdf_text
+    assert "0000000789" in zip_text and "CORREGIDO" in zip_text
+    assert records.equals(original)
+    assert corrected.loc[0, "_FILA_ORIGEN"] == original.loc[0, "_FILA_ORIGEN"]
+    assert len(logged) == 2
+    assert all("manual_edit" in message and "source_row" in message for message, _ in logged)
+    assert all("0000000789" not in str(entry) and "CORREGIDO" not in str(entry) for entry in logged)
 
 
 def test_service_default_pdf_fits_seventy_rows_and_places_logo_left(monkeypatch) -> None:

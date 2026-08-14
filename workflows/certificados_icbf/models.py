@@ -5,11 +5,11 @@ from typing import Any
 import pandas as pd
 from PySide6 import QtCore, QtGui
 
-from workflows.certificados_icbf.service import CertificadosIcbfService, service
+from workflows.certificados_icbf.service import EDITABLE_FIELDS, CertificadosIcbfService, service
 
 
 class RecordsTableModel(QtCore.QAbstractTableModel):
-    """Qt adapter for the working DataFrame; only INCLUIR is editable."""
+    """Qt adapter for the editable working DataFrame."""
 
     review_changed = QtCore.Signal(object)
     STATUS_COLUMN = "ESTADO"
@@ -53,7 +53,7 @@ class RecordsTableModel(QtCore.QAbstractTableModel):
 
         if column == "INCLUIR" and role == QtCore.Qt.CheckStateRole:
             return QtCore.Qt.Checked if bool(self._records.iloc[row][column]) else QtCore.Qt.Unchecked
-        if role == QtCore.Qt.DisplayRole:
+        if role in (QtCore.Qt.DisplayRole, QtCore.Qt.EditRole):
             if column == self.STATUS_COLUMN:
                 return row_review["status"]
             if column == "INCLUIR":
@@ -62,7 +62,10 @@ class RecordsTableModel(QtCore.QAbstractTableModel):
             return "" if pd.isna(value) else str(value)
         if role == QtCore.Qt.ToolTipRole:
             anomalies = row_review["anomalies"]
-            return "\n".join(anomalies) if anomalies else row_review["status"]
+            detail = "\n".join(anomalies) if anomalies else row_review["status"]
+            if column in EDITABLE_FIELDS:
+                return f"Campo editable: doble clic para corregir.\n{detail}"
+            return detail
         if role == QtCore.Qt.ForegroundRole:
             color = "#64748b" if row_review["status"] == "No incluido" else "#0f172a"
             return QtGui.QBrush(QtGui.QColor(color))
@@ -71,20 +74,35 @@ class RecordsTableModel(QtCore.QAbstractTableModel):
                 return QtGui.QBrush(QtGui.QColor("#f1f5f9"))
             if row_review["anomalies"]:
                 return QtGui.QBrush(QtGui.QColor("#fff7ed"))
+            if column in EDITABLE_FIELDS:
+                return QtGui.QBrush(QtGui.QColor("#eff6ff"))
             return QtGui.QBrush(QtGui.QColor("#f0fdf4"))
         if role == QtCore.Qt.TextAlignmentRole:
             return QtCore.Qt.AlignVCenter | QtCore.Qt.AlignLeft
         return None
 
     def setData(self, index: QtCore.QModelIndex, value, role: int = QtCore.Qt.EditRole) -> bool:
-        if not index.isValid() or self._columns[index.column()] != "INCLUIR":
+        if not index.isValid():
             return False
-        if role not in (QtCore.Qt.CheckStateRole, QtCore.Qt.EditRole):
+        column = self._columns[index.column()]
+        if column == "INCLUIR":
+            if role not in (QtCore.Qt.CheckStateRole, QtCore.Qt.EditRole):
+                return False
+            included = value == QtCore.Qt.Checked if role == QtCore.Qt.CheckStateRole else bool(value)
+            self._review = self._session.set_included(index.row(), included)
+            self._records = self._session.records
+        elif column in EDITABLE_FIELDS and role == QtCore.Qt.EditRole:
+            updated = self._service.update_editable_field(
+                self._records, index.row(), column, value
+            )
+            self._review = self._session.revalidate(updated)
+            self._records = self._session.records
+        else:
             return False
-        included = value == QtCore.Qt.Checked if role == QtCore.Qt.CheckStateRole else bool(value)
-        self._review = self._session.set_included(index.row(), included)
-        self._records = self._session.records
-        self.dataChanged.emit(self.index(0, 0), self.index(self.rowCount() - 1, self.columnCount() - 1))
+        self.dataChanged.emit(
+            self.index(0, 0),
+            self.index(self.rowCount() - 1, self.columnCount() - 1),
+        )
         self.review_changed.emit(self._review)
         return True
 
@@ -92,6 +110,8 @@ class RecordsTableModel(QtCore.QAbstractTableModel):
         flags = super().flags(index)
         if index.isValid() and self._columns[index.column()] == "INCLUIR":
             flags |= QtCore.Qt.ItemIsUserCheckable | QtCore.Qt.ItemIsEditable
+        elif index.isValid() and self._columns[index.column()] in EDITABLE_FIELDS:
+            flags |= QtCore.Qt.ItemIsEditable
         return flags
 
     def headerData(self, section: int, orientation: QtCore.Qt.Orientation, role: int = QtCore.Qt.DisplayRole):
