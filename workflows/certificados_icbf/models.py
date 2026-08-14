@@ -92,10 +92,14 @@ class RecordsTableModel(QtCore.QAbstractTableModel):
             self._review = self._session.set_included(index.row(), included)
             self._records = self._session.records
         elif column in EDITABLE_FIELDS and role == QtCore.Qt.EditRole:
+            source_row = int(self._records.iloc[index.row()]["_FILA_ORIGEN"])
             updated = self._service.update_editable_field(
                 self._records, index.row(), column, value
             )
-            self._review = self._session.revalidate(updated)
+            invalidated = {source_row} if column == "DOCUMENTO" else set()
+            self._review = self._session.revalidate(
+                updated, invalidate_document_source_rows=invalidated
+            )
             self._records = self._session.records
         else:
             return False

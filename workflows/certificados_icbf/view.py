@@ -243,11 +243,12 @@ class CertificadosIcbfView(QtWidgets.QWidget):
         )
         self.table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
         self.table.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
+        self.table.verticalHeader().setDefaultSectionSize(24)
         self.table.setSortingEnabled(False)
         self.table.setSizePolicy(
             QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding
         )
-        self.table.setMinimumHeight(285)
+        self.table.setMinimumHeight(240)
         self.table.verticalHeader().setVisible(False)
         self.table.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Interactive)
         self.table.horizontalHeader().setDefaultSectionSize(145)
@@ -255,20 +256,31 @@ class CertificadosIcbfView(QtWidgets.QWidget):
         splitter.addWidget(self.table)
 
         detail_group = QtWidgets.QGroupBox("Detalle del registro seleccionado")
-        detail_layout = QtWidgets.QVBoxLayout(detail_group)
+        detail_layout = QtWidgets.QHBoxLayout(detail_group)
         self.detail = QtWidgets.QLabel("Selecciona una fila para consultar su estado.")
         self.detail.setWordWrap(True)
         self.detail.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
-        detail_layout.addWidget(self.detail)
+        detail_layout.addWidget(self.detail, 1)
         self.document_exception_button = QtWidgets.QPushButton()
+        self.document_exception_button.setMinimumHeight(42)
+        self.document_exception_button.setMinimumWidth(260)
+        self.document_exception_button.setStyleSheet(
+            "QPushButton[authorizationState='pending'] {"
+            " background: #f59e0b; color: #1f2937; border: 1px solid #d97706;"
+            " border-radius: 5px; padding: 8px 16px; font-weight: 700; }"
+            "QPushButton[authorizationState='pending']:hover { background: #fbbf24; }"
+            "QPushButton[authorizationState='authorized'] {"
+            " background: #f8fafc; color: #475569; border: 1px solid #94a3b8;"
+            " border-radius: 5px; padding: 7px 14px; font-weight: 600; }"
+        )
         self.document_exception_button.setVisible(False)
         self.document_exception_button.clicked.connect(self._toggle_document_exception)
         detail_layout.addWidget(self.document_exception_button)
-        detail_group.setMaximumHeight(145)
+        detail_group.setMaximumHeight(100)
         splitter.addWidget(detail_group)
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 0)
-        splitter.setSizes([520, 90])
+        splitter.setSizes([520, 76])
         review_layout.addWidget(splitter, 1)
 
         footer = QtWidgets.QHBoxLayout()
@@ -467,8 +479,13 @@ class CertificadosIcbfView(QtWidgets.QWidget):
         pending = "nonstandard" in row_review["categories"]
         self.document_exception_button.setVisible(authorized or pending)
         self.document_exception_button.setText(
-            "Revocar autorización" if authorized else "Autorizar excepción documental"
+            "Revocar autorización" if authorized else "Autorizar documento no estándar"
         )
+        self.document_exception_button.setProperty(
+            "authorizationState", "authorized" if authorized else "pending"
+        )
+        self.document_exception_button.style().unpolish(self.document_exception_button)
+        self.document_exception_button.style().polish(self.document_exception_button)
 
     @QtCore.Slot()
     def _toggle_document_exception(self) -> None:

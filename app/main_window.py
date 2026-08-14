@@ -64,7 +64,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.navigation_workflow_ids: list[str | None] = [None]
 
         self.setWindowTitle(f"{APP_NAME} {APP_VERSION}")
-        self.resize(1180, 760)
 
         root = QtWidgets.QWidget()
         layout = QtWidgets.QHBoxLayout(root)
@@ -87,6 +86,23 @@ class MainWindow(QtWidgets.QMainWindow):
         layout.addWidget(self.pages, 1)
         self.setCentralWidget(root)
         self.statusBar().showMessage("Listo")
+        self._fit_restored_window_to_available_area()
+
+    def _fit_restored_window_to_available_area(self) -> None:
+        """Size and center the restored window inside the usable desktop area."""
+        screen = self.screen() or QtWidgets.QApplication.primaryScreen()
+        if screen is None:
+            self.resize(1180, 700)
+            return
+        available = screen.availableGeometry()
+        margin = 24
+        width = min(1180, max(760, available.width() - margin * 2))
+        height = min(700, max(560, available.height() - margin * 2))
+        self.resize(width, height)
+        self.move(
+            available.x() + (available.width() - width) // 2,
+            available.y() + (available.height() - height) // 2,
+        )
 
     @QtCore.Slot(str)
     def open_workflow(self, workflow_id: str) -> None:

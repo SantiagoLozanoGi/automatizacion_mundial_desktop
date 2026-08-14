@@ -209,3 +209,59 @@ def test_review_table_shows_at_least_eight_rows_at_enterprise_resolution() -> No
     assert view.minimumSizeHint().height() <= 768
     assert visible_rows >= 8
     view.close()
+
+
+def test_main_window_restored_geometry_respects_available_desktop(monkeypatch) -> None:
+    app = application()
+
+    class EnterpriseScreen:
+        def availableGeometry(self):
+            return QtCore.QRect(0, 0, 1366, 728)
+
+    monkeypatch.setattr(MainWindow, "screen", lambda self: EnterpriseScreen())
+    window = MainWindow()
+    window.open_workflow("certificados_icbf")
+    certificates = window.workflow_views["certificados_icbf"]
+    base = processed_records().iloc[0].to_dict()
+    records = pd.DataFrame([
+        {**base, "DOCUMENTO": str(index).zfill(10), "_FILA_ORIGEN": index + 2}
+        for index in range(20)
+    ])
+    certificates._show_results(
+        records, {"recibidos": 20, "ingresos": 20, "excluidos": 0}, ""
+    )
+    window.show()
+    app.processEvents()
+    geometry = window.geometry()
+
+    assert geometry.left() >= 0
+    assert geometry.top() >= 0
+    assert geometry.right() < 1366
+    assert geometry.bottom() < 728
+    assert certificates.table.viewport().height() // certificates.table.rowHeight(0) >= 5
+    assert app is QtWidgets.QApplication.instance()
+    window.close()
+
+
+def test_document_authorization_action_has_clear_pending_and_authorized_states() -> None:
+    app = application()
+    view = CertificadosIcbfView()
+    records = processed_records()
+    records.loc[0, "DOCUMENTO"] = "PAS12345"
+    view._show_results(records, {"recibidos": 1, "ingresos": 1, "excluidos": 0}, "")
+    view.show()
+    view.table.selectRow(0)
+    app.processEvents()
+
+    assert view.document_exception_button.isVisible()
+    assert view.document_exception_button.text() == "Autorizar documento no estándar"
+    assert view.document_exception_button.property("authorizationState") == "pending"
+    assert "requiere autorización" in view.detail.text()
+
+    view.table_model.authorize_document_exception(0)
+    app.processEvents()
+
+    assert view.document_exception_button.text() == "Revocar autorización"
+    assert view.document_exception_button.property("authorizationState") == "authorized"
+    assert "✓ Documento no estándar autorizado" in view.detail.text()
+    view.close()

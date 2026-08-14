@@ -102,7 +102,7 @@ def _text(value: object) -> str:
 
 
 def _document(value: object) -> str:
-    """Preserve textual identifiers and normalize only numeric Excel values."""
+    """Preserve textual identifiers while removing approved dot separators."""
     if value is None or (not isinstance(value, str) and pd.isna(value)):
         return ""
     if isinstance(value, Real) and not isinstance(value, bool):
@@ -110,7 +110,7 @@ def _document(value: object) -> str:
         if isfinite(numeric) and numeric.is_integer():
             text = str(int(numeric))
             return text.zfill(10) if len(text) <= 10 else text
-    return str(value).strip()
+    return str(value).strip().replace(".", "")
 
 
 def _document_from_excel(value: object) -> str:

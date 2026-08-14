@@ -70,7 +70,11 @@ class ReviewSession:
         ]
         self._duplicate_indexes = set().union(*self._duplicate_groups) if self._duplicate_groups else set()
 
-    def revalidate(self, records: pd.DataFrame) -> dict[str, Any]:
+    def revalidate(
+        self,
+        records: pd.DataFrame,
+        invalidate_document_source_rows: set[int] | frozenset[int] = frozenset(),
+    ) -> dict[str, Any]:
         """Replace business data and rebuild the cache after a future field edit."""
         self._records = records.copy(deep=True).reset_index(drop=True)
         current_documents = {
@@ -80,7 +84,8 @@ class ReviewSession:
         self._authorized_documents = {
             source_row: document
             for source_row, document in self._authorized_documents.items()
-            if current_documents.get(source_row) == document
+            if source_row not in invalidate_document_source_rows
+            and current_documents.get(source_row) == document
         }
         self._build_cache()
         return self.snapshot()
@@ -160,10 +165,10 @@ class ReviewSession:
                 categories.add("duplicates")
             if index in self._invalid_indexes:
                 if index in authorized_indexes:
-                    anomalies.append("Excepción documental autorizada.")
+                    anomalies.append("✓ Documento no estándar autorizado.")
                     categories.add("authorized_exception")
                 else:
-                    anomalies.append("Documento no estándar pendiente de autorización.")
+                    anomalies.append("⚠ Documento no estándar — requiere autorización.")
                     categories.add("nonstandard")
             if index in self._missing_by_index:
                 anomalies.append(
