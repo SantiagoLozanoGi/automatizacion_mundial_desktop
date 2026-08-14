@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 from pathlib import Path
+from time import perf_counter
 
 from PySide6 import QtCore, QtWidgets
 
-from app.file_io import save_bytes_to_file
+from app.file_io import FileOperationError, open_folder, save_bytes_to_file
+from app.logging_config import get_logger, safe_file_metadata
 from workflows.certificados_icbf.models import RecordsFilterProxyModel, RecordsTableModel
 from workflows.certificados_icbf.service import service
+
+
+logger = get_logger("certificados_icbf")
 
 
 class ExcelProcessorWorker(QtCore.QObject):
@@ -20,12 +25,26 @@ class ExcelProcessorWorker(QtCore.QObject):
 
     @QtCore.Slot()
     def run(self) -> None:
+        started = perf_counter()
+        logger.info("Procesamiento iniciado %s", safe_file_metadata(self.file_path))
         try:
             records, stats = service.read_and_clean_excel(self.file_path)
             email_text = service.build_email_text(records)
+            logger.info(
+                "Procesamiento finalizado registros=%s recibidos=%s excluidos=%s tiempo=%.3fs",
+                len(records), stats["recibidos"], stats["excluidos"], perf_counter() - started,
+            )
             self.succeeded.emit(records, stats, email_text)
-        except Exception as error:
-            self.failed.emit(str(error))
+        except ValueError:
+            logger.warning("Procesamiento rechazado por formato o datos invalidos")
+            self.failed.emit(
+                "No fue posible procesar el archivo. Verifique que sea un Excel válido y contenga las columnas requeridas."
+            )
+        except Exception:
+            logger.exception("Fallo inesperado durante procesamiento")
+            self.failed.emit(
+                "No fue posible procesar el archivo por un error inesperado. Puede volver a intentarlo."
+            )
         finally:
             self.finished.emit()
 
@@ -42,6 +61,8 @@ class OutputGenerationWorker(QtCore.QObject):
 
     @QtCore.Slot()
     def run(self) -> None:
+        started = perf_counter()
+        logger.info("Generacion iniciada tipo=%s registros=%s", self.output_type, len(self.records))
         try:
             if self.output_type == "pdf":
                 content = service.generate_pdf(self.records)
@@ -49,14 +70,29 @@ class OutputGenerationWorker(QtCore.QObject):
                 content = service.generate_pdf_zip_by_unit(self.records)
             else:
                 raise ValueError("Tipo de generación no compatible.")
+            logger.info(
+                "Generacion finalizada tipo=%s bytes=%s tiempo=%.3fs",
+                self.output_type, len(content), perf_counter() - started,
+            )
             self.succeeded.emit(self.output_type, content)
-        except Exception as error:
-            self.failed.emit(self.output_type, str(error))
+        except ValueError:
+            logger.warning("Generacion bloqueada tipo=%s", self.output_type)
+            self.failed.emit(
+                self.output_type,
+                "Los registros seleccionados todavía requieren revisión.",
+            )
+        except Exception:
+            logger.exception("Fallo inesperado de generacion tipo=%s", self.output_type)
+            self.failed.emit(
+                self.output_type,
+                "No fue posible generar la salida. Puede volver a intentarlo.",
+            )
         finally:
             self.finished.emit()
 
 
 class CertificadosIcbfView(QtWidgets.QWidget):
+    activity_changed = QtCore.Signal(str)
     ALLOWED_EXTENSIONS = {".xlsx", ".xlsm", ".xls"}
     FILTERS = [
         ("Todos", "all"),
@@ -79,8 +115,19 @@ class CertificadosIcbfView(QtWidgets.QWidget):
         self._worker: ExcelProcessorWorker | None = None
         self._output_thread: QtCore.QThread | None = None
         self._output_worker: OutputGenerationWorker | None = None
+        self._synchronous_busy = False
         self._email_is_current = False
+        self._last_open_directory: Path | None = None
+        self._last_save_directory: Path | None = None
         self._build_ui()
+
+    @property
+    def is_busy(self) -> bool:
+        return (
+            self._thread is not None
+            or self._output_thread is not None
+            or self._synchronous_busy
+        )
 
     def _build_ui(self) -> None:
         layout = QtWidgets.QVBoxLayout(self)
@@ -108,6 +155,12 @@ class CertificadosIcbfView(QtWidgets.QWidget):
         self.status = QtWidgets.QLabel("Esperando un archivo Excel.")
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
+        self.progress = QtWidgets.QProgressBar()
+        self.progress.setRange(0, 0)
+        self.progress.setTextVisible(False)
+        self.progress.setVisible(False)
+        self.progress.setMaximumHeight(8)
+        layout.addWidget(self.progress)
         self._build_summary(layout)
         self.workspace = QtWidgets.QTabWidget()
         self.workspace.setVisible(False)
@@ -256,27 +309,38 @@ class CertificadosIcbfView(QtWidgets.QWidget):
     @QtCore.Slot()
     def _select_file(self) -> None:
         selected, _ = QtWidgets.QFileDialog.getOpenFileName(
-            self, "Seleccionar archivo Excel", "", "Archivos Excel (*.xlsx *.xlsm *.xls)"
+            self,
+            "Seleccionar archivo Excel",
+            str(self._last_open_directory or Path.home()),
+            "Archivos Excel (*.xlsx *.xlsm *.xls)",
         )
         if not selected:
+            logger.info("Seleccion de archivo cancelada")
+            self.activity_changed.emit("Operación cancelada")
             return
         path = Path(selected)
         if path.suffix.lower() not in self.ALLOWED_EXTENSIONS:
+            logger.warning("Extension de entrada no permitida extension=%s", path.suffix.lower())
             QtWidgets.QMessageBox.warning(self, "Archivo no válido", "Selecciona un archivo Excel válido.")
             return
         self.file_path = path
+        self._last_open_directory = path.parent
+        logger.info("Archivo seleccionado %s", safe_file_metadata(path))
         self.file_label.setText(str(path))
         self.process_button.setEnabled(True)
         self.status.setText("Archivo listo para procesar.")
+        self.activity_changed.emit("Archivo listo para procesar")
         self.summary_group.setVisible(False)
         self.workspace.setVisible(False)
 
     @QtCore.Slot()
     def _process_file(self) -> None:
-        if self.file_path is None:
+        if self.file_path is None or self.is_busy:
             return
         self.process_button.setEnabled(False)
         self.status.setText("Procesando archivo…")
+        self.progress.setVisible(True)
+        self.activity_changed.emit("Procesando archivo…")
         self._thread = QtCore.QThread(self)
         self._worker = ExcelProcessorWorker(self.file_path)
         self._worker.moveToThread(self._thread)
@@ -309,6 +373,7 @@ class CertificadosIcbfView(QtWidgets.QWidget):
         self._email_is_current = True
         self._review_changed(self.table_model.review)
         self.status.setText("Procesamiento completado. Revisa los registros y sus anomalías.")
+        self.activity_changed.emit(f"{len(records)} registros procesados")
 
     @QtCore.Slot(object)
     def _review_changed(self, review: dict) -> None:
@@ -384,7 +449,10 @@ class CertificadosIcbfView(QtWidgets.QWidget):
         self.generation_status.setText("Los datos están listos. Selecciona una salida para generarla.")
 
     def _start_generation(self, output_type: str) -> None:
+        if self.is_busy:
+            return
         if self.table_model is None or not self.table_model.review["ready"]:
+            logger.warning("Intento de generacion sin registros listos tipo=%s", output_type)
             QtWidgets.QMessageBox.warning(
                 self, "Generación bloqueada", "Los registros seleccionados todavía requieren revisión."
             )
@@ -408,38 +476,71 @@ class CertificadosIcbfView(QtWidgets.QWidget):
 
     @QtCore.Slot(str, str)
     def _generation_failed(self, output_type: str, technical_detail: str) -> None:
-        self.generation_status.setText(f"Detalle técnico: {technical_detail}")
+        self.generation_status.setText("La generación no pudo completarse. Los datos de revisión se conservaron.")
+        self.activity_changed.emit("Error de generación; puede volver a intentarlo")
         QtWidgets.QMessageBox.critical(
-            self, "No se pudo generar", f"No fue posible generar la salida {output_type.upper()}. Puedes volver a intentarlo."
+            self,
+            "No se pudo generar",
+            technical_detail,
         )
 
     @QtCore.Slot()
     def _generation_finished(self) -> None:
         self._output_thread = None
         self._output_worker = None
+        self.progress.setVisible(False)
+        self.process_button.setEnabled(self.file_path is not None)
         if self.table_model is not None:
             self._review_changed(self.table_model.review)
 
     def _set_generation_busy(self, busy: bool, output_type: str = "") -> None:
         self.pdf_button.setEnabled(not busy and bool(self.table_model and self.table_model.review["ready"]))
         self.zip_button.setEnabled(not busy and bool(self.table_model and self.table_model.review["ready"]))
+        self.duplicates_button.setEnabled(
+            not busy and bool(self.table_model and self.table_model.review["summary"]["reporte_duplicados"])
+        )
+        self.missing_button.setEnabled(
+            not busy and bool(self.table_model and self.table_model.review["summary"]["reporte_faltantes"])
+        )
+        self.process_button.setEnabled(not busy and self.file_path is not None)
+        self.progress.setVisible(busy)
         if busy:
-            self.generation_status.setText(f"Generando {output_type.upper()}…")
+            description = "ZIP por unidad" if output_type == "zip" else output_type.upper()
+            message = f"Generando {description}…"
+            self.generation_status.setText(message)
+            self.activity_changed.emit(message)
 
     def _save_report(self, report_type: str) -> None:
-        if self.table_model is None:
+        if self.table_model is None or self.is_busy:
             return
+        started = perf_counter()
+        self._synchronous_busy = True
+        self._set_generation_busy(True, "reporte")
         try:
             if report_type == "duplicates":
                 content = service.generate_duplicates_report(self.table_model.review_session)
             else:
                 content = service.generate_missing_fields_report(self.table_model.review_session)
+            logger.info(
+                "Reporte generado tipo=%s bytes=%s tiempo=%.3fs",
+                report_type, len(content), perf_counter() - started,
+            )
             self._request_save(content, report_type)
-        except Exception as error:
-            self.generation_status.setText(f"Detalle técnico: {error}")
+        except ValueError:
+            logger.warning("Reporte no disponible tipo=%s", report_type)
+            self.generation_status.setText("No existen registros para este reporte.")
+            QtWidgets.QMessageBox.critical(
+                self, "Reporte no disponible", "No existen registros para generar este reporte."
+            )
+        except Exception:
+            logger.exception("Fallo inesperado preparando reporte tipo=%s", report_type)
+            self.generation_status.setText("No fue posible preparar el reporte. Los datos se conservaron.")
             QtWidgets.QMessageBox.critical(
                 self, "No se pudo generar", "No fue posible preparar el reporte. Puedes volver a intentarlo."
             )
+        finally:
+            self._synchronous_busy = False
+            self._set_generation_busy(False)
 
     def _request_save(self, content: bytes, output_type: str) -> None:
         if self.file_path is None:
@@ -450,23 +551,51 @@ class CertificadosIcbfView(QtWidgets.QWidget):
             "duplicates": "Archivo Excel (*.xlsx)", "missing": "Archivo Excel (*.xlsx)",
         }
         destination, _ = QtWidgets.QFileDialog.getSaveFileName(
-            self, "Guardar archivo", filename, filters[output_type]
+            self,
+            "Guardar archivo",
+            str((self._last_save_directory or self.file_path.parent) / filename),
+            filters[output_type],
         )
         if not destination:
             self.generation_status.setText("Guardado cancelado por el usuario.")
+            self.activity_changed.emit("Operación cancelada")
+            logger.info("Guardado cancelado tipo=%s", output_type)
             return
         try:
             saved_path = save_bytes_to_file(destination, content)
-        except Exception as error:
-            self.generation_status.setText(f"Detalle técnico: {error}")
+        except (FileOperationError, FileNotFoundError, ValueError):
+            logger.warning("Guardado rechazado tipo=%s", output_type)
+            self.generation_status.setText("No fue posible guardar el archivo. Los datos se conservaron para reintentar.")
             QtWidgets.QMessageBox.critical(
                 self, "No se pudo guardar", "No fue posible escribir el archivo en la ubicación seleccionada."
             )
             return
+        except Exception:
+            logger.exception("Fallo inesperado guardando salida tipo=%s", output_type)
+            self.generation_status.setText("No fue posible guardar el archivo. Los datos se conservaron.")
+            QtWidgets.QMessageBox.critical(
+                self, "No se pudo guardar", "Ocurrió un error inesperado al guardar. Puede volver a intentarlo."
+            )
+            return
+        self._last_save_directory = saved_path.parent
+        logger.info("Archivo guardado tipo=%s extension=%s bytes=%s", output_type, saved_path.suffix, len(content))
         self.generation_status.setText(f"Archivo guardado correctamente: {saved_path}")
-        QtWidgets.QMessageBox.information(
-            self, "Guardado completo", f"Archivo guardado correctamente.\n\n{saved_path}"
+        self.activity_changed.emit(f"{output_type.upper()} guardado correctamente")
+        open_result = QtWidgets.QMessageBox.question(
+            self,
+            "Guardado completo",
+            "Archivo guardado correctamente.\n\n¿Desea abrir la carpeta de salida?",
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+            QtWidgets.QMessageBox.No,
         )
+        if open_result == QtWidgets.QMessageBox.Yes:
+            try:
+                open_folder(saved_path.parent)
+            except (FileOperationError, FileNotFoundError):
+                logger.warning("No fue posible abrir carpeta de salida")
+                QtWidgets.QMessageBox.warning(
+                    self, "No se pudo abrir", "No fue posible abrir la carpeta de salida."
+                )
 
     def _copy_email_text(self) -> None:
         if self.table_model is None:
@@ -492,11 +621,13 @@ class CertificadosIcbfView(QtWidgets.QWidget):
     @QtCore.Slot(str)
     def _show_error(self, message: str) -> None:
         self.status.setText("No fue posible procesar el archivo.")
+        self.activity_changed.emit("Error de procesamiento; puede volver a intentarlo")
         QtWidgets.QMessageBox.critical(self, "Error al procesar", message)
 
     @QtCore.Slot()
     def _processing_finished(self) -> None:
         self.process_button.setEnabled(self.file_path is not None)
+        self.progress.setVisible(False)
         self._thread = None
         self._worker = None
 

@@ -20,6 +20,16 @@ Todos los cambios relevantes de la aplicación se documentarán en este archivo.
 - Readiness y certificados continúan considerando únicamente los registros incluidos.
 - Scrollbars vertical y horizontal con contraste y tamaño explícitos para el tema claro.
 
+### Robustez y experiencia
+
+- Logging centralizado y rotativo fuera del repositorio, con protección de datos personales.
+- Manejo diferenciado de errores esperados e inesperados y captura global de excepciones.
+- Escritura atómica para evitar archivos parciales y mensajes recuperables de guardado.
+- Progreso indeterminado, prevención de tareas duplicadas y cierre seguro durante workers.
+- Barra de estado conectada al flujo de procesamiento y generación.
+- Últimas carpetas de apertura/guardado recordadas durante la sesión.
+- Opción de abrir la carpeta de salida después de guardar correctamente.
+
 ## [0.3.0] - 2026-08-13
 
 ### Añadido

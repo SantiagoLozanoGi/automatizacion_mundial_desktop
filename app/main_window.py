@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
+from app.logging_config import configure_logging, install_exception_hook
 from config.resources import CORPORATE_LOGO_PATH
 from version import APP_VERSION
 from workflows.certificados_icbf.view import CertificadosIcbfView
@@ -62,20 +63,38 @@ class MainWindow(QtWidgets.QMainWindow):
         self.pages = QtWidgets.QStackedWidget()
         self.home = HomeView()
         self.certificates = CertificadosIcbfView()
+        self.certificates.activity_changed.connect(self.statusBar().showMessage)
         self.home.open_certificates.connect(lambda: self.navigation.setCurrentRow(1))
         self.pages.addWidget(self.home)
         self.pages.addWidget(self.certificates)
         layout.addWidget(self.pages, 1)
         self.setCentralWidget(root)
+        self.statusBar().showMessage("Listo")
 
     @QtCore.Slot(int)
     def _show_page(self, index: int) -> None:
         if 0 <= index < self.pages.count():
             self.pages.setCurrentIndex(index)
 
+    def closeEvent(self, event: QtGui.QCloseEvent) -> None:
+        if self.certificates.is_busy:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Operación en progreso",
+                "Hay una operación en progreso. Espere a que finalice antes de cerrar la aplicación.",
+            )
+            event.ignore()
+            return
+        event.accept()
+
 
 def run_app() -> None:
+    logger = configure_logging()
+    logger.info("Aplicacion iniciada version=%s", APP_VERSION)
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    install_exception_hook(
+        lambda message: QtWidgets.QMessageBox.critical(None, "Error inesperado", message)
+    )
     window = MainWindow()
     window.show()
     app.exec()
