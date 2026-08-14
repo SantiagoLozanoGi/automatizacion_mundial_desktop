@@ -2,6 +2,22 @@
 
 Todos los cambios relevantes de la aplicación se documentarán en este archivo.
 
+## [0.5.0] - 2026-08-14
+
+### Añadido
+
+- Registro central explícito con metadata, validación de IDs y estado habilitado.
+- Contrato mínimo de integración para vistas de workflows.
+- Creación diferida y reutilización de vistas durante la sesión.
+- Manejo recuperable de errores al inicializar un workflow.
+- Guía para agregar workflows futuros sin introducir módulos ficticios.
+
+### Cambiado
+
+- Menú lateral y pantalla Inicio generados desde el registro.
+- `MainWindow` desacoplada de la implementación concreta de Certificados ICBF.
+- Nombre general de la aplicación centralizado en configuración.
+
 ## [0.4.0] - 2026-08-14
 
 ### Cambiado

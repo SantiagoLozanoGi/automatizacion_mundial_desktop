@@ -1,23 +1,24 @@
 # Automatización Mundial
 
-Proyecto nuevo de escritorio para migrar la lógica funcional del prototipo Streamlit sin alterar su comportamiento original.
+Plataforma modular de escritorio para automatizar procesos de Mundial de Seguros. **Certificados ICBF** es actualmente el primer y único workflow implementado.
 
-## Estructura
+## Arquitectura
 
-- app/: aplicación PySide6
-- workflows/certificados_icbf/legacy/: lógica heredada copiada fielmente
-- workflows/certificados_icbf/service.py: capa de servicio
-- tests/: pruebas de regresión
-- assets/: recursos de la UI
-- config/: configuración
+- `app/`: ventana principal, registro de workflows, logging y file IO comunes.
+- `config/`: nombre, identificador y resolución de recursos de la aplicación.
+- `workflows/certificados_icbf/`: vista, modelos y servicio exclusivos del flujo ICBF.
+- `workflows/certificados_icbf/legacy/`: lógica heredada protegida.
+- `assets/`: recursos visuales compartidos.
+- `tests/`: regresión, servicios, modelos, UI y registro modular.
+- `docs/adding_workflows.md`: guía para incorporar un flujo futuro.
 
-## Propósito
+La navegación e Inicio se generan desde `app/workflow_registry.py`. Cada vista se crea al entrar por primera vez y se conserva durante la sesión, evitando reprocesamiento y pérdida de estado.
 
-Mantener intacto el prototipo original bajo `automatizacion_certificados/` y migrar únicamente la lógica funcional heredada a una nueva base modular.
+## Desarrollo
 
-## Reglas de migración
+```powershell
+python -m pytest -q
+python main.py
+```
 
-- conservar algoritmos y nombres originales;
-- no reescribir reglas de negocio;
-- documentar incompatibilidades técnicas reales antes de cambiar comportamiento;
-- verificar regresión antes de introducir la interfaz.
+Las reglas de negocio ICBF permanecen dentro de su módulo. Las capacidades compartidas pertenecen a `app/`; ningún workflow debe depender de internals privados de otro.

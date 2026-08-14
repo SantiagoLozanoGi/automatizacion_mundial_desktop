@@ -21,10 +21,13 @@ def test_main_window_and_certificates_view_construct() -> None:
     app = application()
     window = MainWindow()
 
+    assert window.pages.count() == 1
+    window.open_workflow("certificados_icbf")
+    certificates = window.workflow_views["certificados_icbf"]
     assert window.pages.count() == 2
-    assert isinstance(window.certificates, CertificadosIcbfView)
-    assert window.certificates.workspace.count() == 2
-    assert window.certificates.table.sizePolicy().verticalPolicy() == QtWidgets.QSizePolicy.Expanding
+    assert isinstance(certificates, CertificadosIcbfView)
+    assert certificates.workspace.count() == 2
+    assert certificates.table.sizePolicy().verticalPolicy() == QtWidgets.QSizePolicy.Expanding
     assert app is QtWidgets.QApplication.instance()
 
     window.close()
@@ -105,14 +108,34 @@ def test_generation_error_keeps_processed_state(monkeypatch) -> None:
 def test_main_window_refuses_close_while_busy(monkeypatch) -> None:
     application()
     window = MainWindow()
-    window.certificates._synchronous_busy = True
+    window.open_workflow("certificados_icbf")
+    certificates = window.workflow_views["certificados_icbf"]
+    certificates._synchronous_busy = True
     monkeypatch.setattr(QtWidgets.QMessageBox, "warning", lambda *args: None)
     event = QtGui.QCloseEvent()
 
     window.closeEvent(event)
 
     assert not event.isAccepted()
-    window.certificates._synchronous_busy = False
+    certificates._synchronous_busy = False
+    window.close()
+
+
+def test_navigation_reuses_workflow_view_and_preserves_state() -> None:
+    application()
+    window = MainWindow()
+    window.open_workflow("certificados_icbf")
+    certificates = window.workflow_views["certificados_icbf"]
+    records = processed_records()
+    certificates._show_results(
+        records, {"recibidos": 1, "ingresos": 1, "excluidos": 0}, "correo"
+    )
+
+    window.navigation.setCurrentRow(0)
+    window.open_workflow("certificados_icbf")
+
+    assert window.workflow_views["certificados_icbf"] is certificates
+    assert certificates.table_model.records.equals(records)
     window.close()
 
 

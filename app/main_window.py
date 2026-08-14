@@ -1,17 +1,23 @@
 from __future__ import annotations
 
+import logging
+
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from app.logging_config import configure_logging, install_exception_hook
+from app.workflow_contract import WorkflowDefinition
+from app.workflow_registry import WorkflowRegistry, workflow_registry
 from config.resources import CORPORATE_LOGO_PATH
+from config.settings import APP_NAME
 from version import APP_VERSION
-from workflows.certificados_icbf.view import CertificadosIcbfView
+
+logger = logging.getLogger(__name__)
 
 
 class HomeView(QtWidgets.QWidget):
-    open_certificates = QtCore.Signal()
+    workflow_requested = QtCore.Signal(str)
 
-    def __init__(self) -> None:
+    def __init__(self, workflows: tuple[WorkflowDefinition, ...]) -> None:
         super().__init__()
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(48, 36, 48, 36)
@@ -25,7 +31,7 @@ class HomeView(QtWidgets.QWidget):
             ))
         layout.addWidget(logo)
 
-        title = QtWidgets.QLabel("Automatización de Procesos – Mundial de Seguros")
+        title = QtWidgets.QLabel(APP_NAME)
         title.setAlignment(QtCore.Qt.AlignCenter)
         title.setWordWrap(True)
         title.setStyleSheet("font-size: 24px; font-weight: 600;")
@@ -36,17 +42,28 @@ class HomeView(QtWidgets.QWidget):
         layout.addWidget(version)
         layout.addSpacing(24)
 
-        certificates = QtWidgets.QPushButton("Abrir Certificados ICBF")
-        certificates.setMinimumHeight(46)
-        certificates.clicked.connect(self.open_certificates.emit)
-        layout.addWidget(certificates)
+        for definition in workflows:
+            button = QtWidgets.QPushButton(f"Abrir {definition.name}")
+            button.setToolTip(definition.description)
+            button.setMinimumHeight(46)
+            button.clicked.connect(
+                lambda checked=False, workflow_id=definition.id: self.workflow_requested.emit(
+                    workflow_id
+                )
+            )
+            layout.addWidget(button)
         layout.addStretch()
 
 
 class MainWindow(QtWidgets.QMainWindow):
-    def __init__(self) -> None:
+    def __init__(self, registry: WorkflowRegistry = workflow_registry) -> None:
         super().__init__()
-        self.setWindowTitle(f"Automatización de Procesos – Mundial de Seguros {APP_VERSION}")
+        self.registry = registry
+        self.workflow_definitions = registry.enabled()
+        self.workflow_views: dict[str, QtWidgets.QWidget] = {}
+        self.navigation_workflow_ids: list[str | None] = [None]
+
+        self.setWindowTitle(f"{APP_NAME} {APP_VERSION}")
         self.resize(1180, 760)
 
         root = QtWidgets.QWidget()
@@ -55,29 +72,73 @@ class MainWindow(QtWidgets.QMainWindow):
         layout.setSpacing(0)
         self.navigation = QtWidgets.QListWidget()
         self.navigation.setFixedWidth(220)
-        self.navigation.addItems(["Inicio", "Certificados ICBF"])
+        self.navigation.addItem("Inicio")
+        for definition in self.workflow_definitions:
+            self.navigation.addItem(definition.name)
+            self.navigation_workflow_ids.append(definition.id)
         self.navigation.setCurrentRow(0)
         self.navigation.currentRowChanged.connect(self._show_page)
         layout.addWidget(self.navigation)
 
         self.pages = QtWidgets.QStackedWidget()
-        self.home = HomeView()
-        self.certificates = CertificadosIcbfView()
-        self.certificates.activity_changed.connect(self.statusBar().showMessage)
-        self.home.open_certificates.connect(lambda: self.navigation.setCurrentRow(1))
+        self.home = HomeView(self.workflow_definitions)
+        self.home.workflow_requested.connect(self.open_workflow)
         self.pages.addWidget(self.home)
-        self.pages.addWidget(self.certificates)
         layout.addWidget(self.pages, 1)
         self.setCentralWidget(root)
         self.statusBar().showMessage("Listo")
 
+    @QtCore.Slot(str)
+    def open_workflow(self, workflow_id: str) -> None:
+        try:
+            navigation_index = self.navigation_workflow_ids.index(workflow_id)
+        except ValueError:
+            logger.warning("workflow=%s operation=navigate status=unknown", workflow_id)
+            return
+        self.navigation.setCurrentRow(navigation_index)
+
     @QtCore.Slot(int)
-    def _show_page(self, index: int) -> None:
-        if 0 <= index < self.pages.count():
-            self.pages.setCurrentIndex(index)
+    def _show_page(self, navigation_index: int) -> None:
+        if navigation_index == 0:
+            self.pages.setCurrentWidget(self.home)
+            return
+        if not 0 <= navigation_index < len(self.navigation_workflow_ids):
+            return
+        workflow_id = self.navigation_workflow_ids[navigation_index]
+        if workflow_id is None:
+            return
+        view = self._get_or_create_workflow_view(workflow_id)
+        if view is not None:
+            self.pages.setCurrentWidget(view)
+
+    def _get_or_create_workflow_view(self, workflow_id: str) -> QtWidgets.QWidget | None:
+        if workflow_id in self.workflow_views:
+            return self.workflow_views[workflow_id]
+        definition = self.registry.get(workflow_id)
+        try:
+            view = definition.create_view()
+        except Exception:
+            logger.exception("workflow=%s operation=load status=failed", workflow_id)
+            QtWidgets.QMessageBox.critical(
+                self,
+                "No fue posible abrir el flujo",
+                f"No fue posible cargar {definition.name}. Puede volver a Inicio e intentarlo de nuevo.",
+            )
+            self.navigation.blockSignals(True)
+            self.navigation.setCurrentRow(0)
+            self.navigation.blockSignals(False)
+            self.pages.setCurrentWidget(self.home)
+            return None
+        activity_signal = getattr(view, "activity_changed", None)
+        if activity_signal is not None:
+            activity_signal.connect(self.statusBar().showMessage)
+        self.workflow_views[workflow_id] = view
+        self.pages.addWidget(view)
+        logger.info("workflow=%s operation=load status=completed", workflow_id)
+        return view
 
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:
-        if self.certificates.is_busy:
+        if any(bool(getattr(view, "is_busy", False)) for view in self.workflow_views.values()):
             QtWidgets.QMessageBox.warning(
                 self,
                 "Operación en progreso",
@@ -89,8 +150,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
 
 def run_app() -> None:
-    logger = configure_logging()
-    logger.info("Aplicacion iniciada version=%s", APP_VERSION)
+    app_logger = configure_logging()
+    app_logger.info("Aplicacion iniciada version=%s", APP_VERSION)
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     install_exception_hook(
         lambda message: QtWidgets.QMessageBox.critical(None, "Error inesperado", message)
