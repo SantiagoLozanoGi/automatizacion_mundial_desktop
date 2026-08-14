@@ -60,7 +60,10 @@ def test_service_generates_pdf_and_zip_with_configured_logo() -> None:
     assert pdf_bytes.startswith(b"%PDF")
     assert len(PdfReader(BytesIO(pdf_bytes)).pages) == 1
     with zipfile.ZipFile(BytesIO(zip_bytes)) as archive:
-        assert sorted(archive.namelist()) == ["Bogotá.pdf", "Cali.pdf"]
+        assert sorted(archive.namelist()) == [
+            "CERTIFICADOS_Bogotá_14-08-2026.pdf",
+            "CERTIFICADOS_Cali_14-08-2026.pdf",
+        ]
         assert all(archive.read(name).startswith(b"%PDF") for name in archive.namelist())
 
 
@@ -118,8 +121,8 @@ def test_service_reports_invalid_and_missing_fields() -> None:
 
     row_review = service.review_records(records)["rows"][0]
 
-    assert row_review["categories"] == {"included", "invalid", "missing"}
-    assert any("Documento inválido" in item for item in row_review["anomalies"])
+    assert row_review["categories"] == {"included", "nonstandard", "missing"}
+    assert any("Documento no estándar" in item for item in row_review["anomalies"])
     assert any("UNIDADES" in item for item in row_review["anomalies"])
 
 
@@ -149,7 +152,7 @@ def test_review_session_reuses_validation_and_revalidates_business_edits(monkeyp
     edited.loc[0, "DOCUMENTO"] = "INVALIDO"
     refreshed = session.revalidate(edited)
     assert calls == 2
-    assert "invalid" in refreshed["rows"][0]["categories"]
+    assert "nonstandard" in refreshed["rows"][0]["categories"]
 
 
 def test_service_preserves_anomaly_reports_independently_of_selection() -> None:
@@ -251,7 +254,7 @@ def test_certificate_outputs_respect_include_selection() -> None:
     assert "Ana" in pdf_text
     assert "Luis" not in pdf_text
     with zipfile.ZipFile(BytesIO(archive)) as zipped:
-        assert zipped.namelist() == ["Bogotá.pdf"]
+        assert zipped.namelist() == ["CERTIFICADOS_Bogotá_14-08-2026.pdf"]
 
 
 def test_manual_edits_feed_reports_pdf_and_zip_without_changing_source(monkeypatch) -> None:
@@ -268,7 +271,7 @@ def test_manual_edits_feed_reports_pdf_and_zip_without_changing_source(monkeypat
     )
     assert workflow_service.output_availability(records)["missing"] == 1
 
-    corrected = workflow_service.update_editable_field(records, 0, "DOCUMENTO", "789")
+    corrected = workflow_service.update_editable_field(records, 0, "DOCUMENTO", "1234567890")
     corrected = workflow_service.update_editable_field(
         corrected, 0, "PRIMER APELLIDO", "CORREGIDO"
     )
@@ -285,13 +288,13 @@ def test_manual_edits_feed_reports_pdf_and_zip_without_changing_source(monkeypat
         page.extract_text() or "" for page in PdfReader(BytesIO(zipped_pdf)).pages
     )
 
-    assert "0000000789" in pdf_text and "CORREGIDO" in pdf_text
-    assert "0000000789" in zip_text and "CORREGIDO" in zip_text
+    assert "1234567890" in pdf_text and "CORREGIDO" in pdf_text
+    assert "1234567890" in zip_text and "CORREGIDO" in zip_text
     assert records.equals(original)
     assert corrected.loc[0, "_FILA_ORIGEN"] == original.loc[0, "_FILA_ORIGEN"]
     assert len(logged) == 2
     assert all("manual_edit" in message and "source_row" in message for message, _ in logged)
-    assert all("0000000789" not in str(entry) and "CORREGIDO" not in str(entry) for entry in logged)
+    assert all("1234567890" not in str(entry) and "CORREGIDO" not in str(entry) for entry in logged)
 
 
 def test_service_default_pdf_fits_seventy_rows_and_places_logo_left(monkeypatch) -> None:

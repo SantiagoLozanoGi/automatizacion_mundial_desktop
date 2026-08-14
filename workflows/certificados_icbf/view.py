@@ -54,10 +54,11 @@ class OutputGenerationWorker(QtCore.QObject):
     failed = QtCore.Signal(str, str)
     finished = QtCore.Signal()
 
-    def __init__(self, output_type: str, records) -> None:
+    def __init__(self, output_type: str, records, authorized_document_exceptions=frozenset()) -> None:
         super().__init__()
         self.output_type = output_type
         self.records = records.copy(deep=True)
+        self.authorized_document_exceptions = frozenset(authorized_document_exceptions)
 
     @QtCore.Slot()
     def run(self) -> None:
@@ -65,9 +66,15 @@ class OutputGenerationWorker(QtCore.QObject):
         logger.info("Generacion iniciada tipo=%s registros=%s", self.output_type, len(self.records))
         try:
             if self.output_type == "pdf":
-                content = service.generate_pdf(self.records)
+                content = service.generate_pdf(
+                    self.records,
+                    authorized_document_exceptions=self.authorized_document_exceptions,
+                )
             elif self.output_type == "zip":
-                content = service.generate_pdf_zip_by_unit(self.records)
+                content = service.generate_pdf_zip_by_unit(
+                    self.records,
+                    authorized_document_exceptions=self.authorized_document_exceptions,
+                )
             else:
                 raise ValueError("Tipo de generación no compatible.")
             logger.info(
@@ -98,7 +105,8 @@ class CertificadosIcbfView(QtWidgets.QWidget):
         ("Todos", "all"),
         ("Válidos", "valid"),
         ("Duplicados", "duplicates"),
-        ("Documentos inválidos", "invalid"),
+        ("Docs. no estándar", "nonstandard"),
+        ("Excepciones autorizadas", "authorized_exception"),
         ("Campos faltantes", "missing"),
         ("Incluidos", "included"),
         ("No incluidos", "excluded"),
@@ -131,7 +139,7 @@ class CertificadosIcbfView(QtWidgets.QWidget):
 
     def _build_ui(self) -> None:
         layout = QtWidgets.QVBoxLayout(self)
-        layout.setContentsMargins(28, 24, 28, 24)
+        layout.setContentsMargins(28, 16, 28, 16)
         layout.setSpacing(12)
         title = QtWidgets.QLabel("Certificados ICBF")
         title.setStyleSheet("font-size: 22px; font-weight: 600;")
@@ -174,7 +182,7 @@ class CertificadosIcbfView(QtWidgets.QWidget):
         labels = [
             ("recibidos", "Recibidos"), ("procesables", "Procesables"),
             ("seleccionados", "Seleccionados"), ("no_seleccionados", "No seleccionados"),
-            ("duplicados", "Duplicados"), ("invalidos", "Docs. inválidos"),
+            ("duplicados", "Duplicados"), ("invalidos", "Docs. no estándar"),
             ("faltantes", "Campos faltantes"), ("validos", "Válidos seleccionados"),
         ]
         self.metrics: dict[str, QtWidgets.QLabel] = {}
@@ -182,7 +190,7 @@ class CertificadosIcbfView(QtWidgets.QWidget):
             caption = QtWidgets.QLabel(text)
             value = QtWidgets.QLabel("—")
             value.setStyleSheet("font-size: 18px; font-weight: 600;")
-            cell = QtWidgets.QVBoxLayout()
+            cell = QtWidgets.QHBoxLayout()
             cell.addWidget(caption)
             cell.addWidget(value)
             row, column = divmod(index, 4)
@@ -239,6 +247,7 @@ class CertificadosIcbfView(QtWidgets.QWidget):
         self.table.setSizePolicy(
             QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding
         )
+        self.table.setMinimumHeight(285)
         self.table.verticalHeader().setVisible(False)
         self.table.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Interactive)
         self.table.horizontalHeader().setDefaultSectionSize(145)
@@ -251,6 +260,11 @@ class CertificadosIcbfView(QtWidgets.QWidget):
         self.detail.setWordWrap(True)
         self.detail.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
         detail_layout.addWidget(self.detail)
+        self.document_exception_button = QtWidgets.QPushButton()
+        self.document_exception_button.setVisible(False)
+        self.document_exception_button.clicked.connect(self._toggle_document_exception)
+        detail_layout.addWidget(self.document_exception_button)
+        detail_group.setMaximumHeight(145)
         splitter.addWidget(detail_group)
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 0)
@@ -441,6 +455,7 @@ class CertificadosIcbfView(QtWidgets.QWidget):
     def _show_row_detail(self, current: QtCore.QModelIndex, _previous: QtCore.QModelIndex) -> None:
         if not current.isValid() or self.proxy_model is None or self.table_model is None:
             self.detail.setText("Selecciona una fila para consultar su estado.")
+            self.document_exception_button.setVisible(False)
             return
         source_row = self.proxy_model.mapToSource(current).row()
         row_review = self.table_model.review["rows"][source_row]
@@ -448,6 +463,43 @@ class CertificadosIcbfView(QtWidgets.QWidget):
         if row_review["status"] == "No incluido":
             messages = ["El registro está desmarcado en INCLUIR."]
         self.detail.setText(f"Estado: {row_review['status']}\n" + "\n".join(f"• {item}" for item in messages))
+        authorized = "authorized_exception" in row_review["categories"]
+        pending = "nonstandard" in row_review["categories"]
+        self.document_exception_button.setVisible(authorized or pending)
+        self.document_exception_button.setText(
+            "Revocar autorización" if authorized else "Autorizar excepción documental"
+        )
+
+    @QtCore.Slot()
+    def _toggle_document_exception(self) -> None:
+        current = self.table.currentIndex()
+        if not current.isValid() or self.proxy_model is None or self.table_model is None:
+            return
+        source_row = self.proxy_model.mapToSource(current).row()
+        categories = self.table_model.categories_for_row(source_row)
+        authorized = "authorized_exception" in categories
+        dialog = QtWidgets.QMessageBox(self)
+        dialog.setWindowTitle("Confirmar excepción documental")
+        dialog.setIcon(QtWidgets.QMessageBox.Warning)
+        dialog.setText(
+            "¿Desea revocar la autorización de este documento?"
+            if authorized
+            else "El documento no cumple el formato estándar de 10 dígitos.\n\n"
+                 "Puede corresponder a un documento extranjero u otro tipo de identificación.\n\n"
+                 "¿Confirma que el dato fue revisado y está autorizado para la generación del certificado?"
+        )
+        confirm = dialog.addButton(
+            "Revocar autorización" if authorized else "Autorizar",
+            QtWidgets.QMessageBox.AcceptRole,
+        )
+        dialog.addButton("Cancelar", QtWidgets.QMessageBox.RejectRole)
+        dialog.exec()
+        if dialog.clickedButton() is not confirm:
+            return
+        if authorized:
+            self.table_model.revoke_document_exception(source_row)
+        else:
+            self.table_model.authorize_document_exception(source_row)
 
     @QtCore.Slot()
     def _continue_to_generation(self) -> None:
@@ -466,7 +518,11 @@ class CertificadosIcbfView(QtWidgets.QWidget):
             return
         self._set_generation_busy(True, output_type)
         self._output_thread = QtCore.QThread(self)
-        self._output_worker = OutputGenerationWorker(output_type, self.table_model.records)
+        self._output_worker = OutputGenerationWorker(
+            output_type,
+            self.table_model.records,
+            self.table_model.review_session.authorized_document_exceptions,
+        )
         self._output_worker.moveToThread(self._output_thread)
         self._output_thread.started.connect(self._output_worker.run)
         self._output_worker.succeeded.connect(self._generation_succeeded)

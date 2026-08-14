@@ -164,9 +164,9 @@ def test_only_authorized_business_fields_are_editable() -> None:
 def test_valid_document_and_first_surname_edits_clear_anomalies() -> None:
     model = RecordsTableModel(editable_records())
 
-    assert edit(model, 0, "DOCUMENTO", "789")
-    assert model.records.loc[0, "DOCUMENTO"] == "0000000789"
-    assert "invalid" not in model.categories_for_row(0)
+    assert edit(model, 0, "DOCUMENTO", "1234567890")
+    assert model.records.loc[0, "DOCUMENTO"] == "1234567890"
+    assert "nonstandard" not in model.categories_for_row(0)
     assert edit(model, 0, "PRIMER APELLIDO", "GÓMEZ")
 
     assert model.anomalies_for_row(0) == []
@@ -183,7 +183,7 @@ def test_invalid_document_edit_remains_invalid() -> None:
     assert edit(model, 0, "DOCUMENTO", "ABC-123")
 
     assert model.records.loc[0, "DOCUMENTO"] == "ABC-123"
-    assert "invalid" in model.categories_for_row(0)
+    assert "nonstandard" in model.categories_for_row(0)
     assert model.review["ready"] is False
 
 
@@ -192,7 +192,7 @@ def test_document_edit_detects_new_duplicate() -> None:
     records.loc[0, "PRIMER APELLIDO"] = "Gómez"
     model = RecordsTableModel(records)
 
-    assert edit(model, 0, "DOCUMENTO", "456")
+    assert edit(model, 0, "DOCUMENTO", "0000000456")
 
     assert model.records.loc[0, "DOCUMENTO"] == "0000000456"
     assert "duplicates" in model.categories_for_row(0)
@@ -218,10 +218,10 @@ def test_edit_while_excluded_persists_after_reinclusion() -> None:
     include = model._columns.index("INCLUIR")
     assert model.setData(model.index(0, include), QtCore.Qt.Unchecked, QtCore.Qt.CheckStateRole)
 
-    assert edit(model, 0, "DOCUMENTO", "789")
+    assert edit(model, 0, "DOCUMENTO", "1234567890")
     assert edit(model, 0, "PRIMER APELLIDO", "Gómez")
     assert model.setData(model.index(0, include), QtCore.Qt.Checked, QtCore.Qt.CheckStateRole)
 
-    assert model.records.loc[0, "DOCUMENTO"] == "0000000789"
+    assert model.records.loc[0, "DOCUMENTO"] == "1234567890"
     assert model.records.loc[0, "PRIMER APELLIDO"] == "Gómez"
     assert model.review["rows"][0]["status"] == "Válido"

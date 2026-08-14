@@ -114,10 +114,10 @@ def test_manual_table_edit_refreshes_workflow_status_and_summary() -> None:
     document_column = view.table_model._columns.index("DOCUMENTO")
 
     assert view.table_model.setData(
-        view.table_model.index(0, document_column), "123", QtCore.Qt.EditRole
+        view.table_model.index(0, document_column), "1234567890", QtCore.Qt.EditRole
     )
 
-    assert view.table_model.records.loc[0, "DOCUMENTO"] == "0000000123"
+    assert view.table_model.records.loc[0, "DOCUMENTO"] == "1234567890"
     assert "Listo para generaci" in view.workflow_status.text()
     assert view.metrics["invalidos"].text() == "0"
     assert view.pdf_button.isEnabled()
@@ -186,4 +186,26 @@ def test_file_selection_remembers_last_open_directory(monkeypatch, tmp_path) -> 
     assert view.file_path == source
     assert view._last_open_directory == tmp_path
     assert view.process_button.isEnabled()
+    view.close()
+
+
+def test_review_table_shows_at_least_eight_rows_at_enterprise_resolution() -> None:
+    app = application()
+    view = CertificadosIcbfView()
+    view.resize(1180, 700)
+    base = processed_records().iloc[0].to_dict()
+    records = pd.DataFrame([
+        {**base, "DOCUMENTO": str(index).zfill(10), "_FILA_ORIGEN": index + 2}
+        for index in range(20)
+    ])
+    view._show_results(
+        records, {"recibidos": 20, "ingresos": 20, "excluidos": 0}, "correo"
+    )
+    view.show()
+    app.processEvents()
+
+    visible_rows = view.table.viewport().height() // view.table.rowHeight(0)
+    assert view.minimumSizeHint().width() <= 1366
+    assert view.minimumSizeHint().height() <= 768
+    assert visible_rows >= 8
     view.close()

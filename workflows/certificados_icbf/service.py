@@ -16,6 +16,7 @@ from workflows.certificados_icbf.legacy.certificate_processor import (
     generate_pdf,
     generate_pdf_zip_by_unit,
     is_missing,
+    is_standard_document,
     normalize_edited_records,
     read_and_clean_excel,
     validate_records,
@@ -37,6 +38,7 @@ class ReviewSession:
 
     def __init__(self, records: pd.DataFrame) -> None:
         self._records = records.copy(deep=True).reset_index(drop=True)
+        self._authorized_documents: dict[int, str] = {}
         self._build_cache()
 
     @property
@@ -71,7 +73,48 @@ class ReviewSession:
     def revalidate(self, records: pd.DataFrame) -> dict[str, Any]:
         """Replace business data and rebuild the cache after a future field edit."""
         self._records = records.copy(deep=True).reset_index(drop=True)
+        current_documents = {
+            int(row["_FILA_ORIGEN"]): str(row["DOCUMENTO"])
+            for _, row in self._records.iterrows()
+        }
+        self._authorized_documents = {
+            source_row: document
+            for source_row, document in self._authorized_documents.items()
+            if current_documents.get(source_row) == document
+        }
         self._build_cache()
+        return self.snapshot()
+
+    @property
+    def authorized_document_exceptions(self) -> frozenset[int]:
+        return frozenset(self._authorized_documents)
+
+    def authorize_document_exception(self, row: int) -> dict[str, Any]:
+        if not 0 <= row < len(self._records):
+            raise IndexError("La fila seleccionada no existe.")
+        record = self._records.iloc[row]
+        document = record["DOCUMENTO"]
+        if is_missing(document):
+            raise ValueError("Un documento faltante no puede autorizarse como excepción.")
+        if is_standard_document(document):
+            raise ValueError("El documento ya cumple el formato estándar.")
+        source_row = int(record["_FILA_ORIGEN"])
+        self._authorized_documents[source_row] = str(document)
+        logger.info(
+            "workflow=certificados_icbf action=document_exception_authorized source_row=%s",
+            source_row,
+        )
+        return self.snapshot()
+
+    def revoke_document_exception(self, row: int) -> dict[str, Any]:
+        if not 0 <= row < len(self._records):
+            raise IndexError("La fila seleccionada no existe.")
+        source_row = int(self._records.iloc[row]["_FILA_ORIGEN"])
+        self._authorized_documents.pop(source_row, None)
+        logger.info(
+            "workflow=certificados_icbf action=document_exception_revoked source_row=%s",
+            source_row,
+        )
         return self.snapshot()
 
     def set_included(self, row: int, included: bool) -> dict[str, Any]:
@@ -98,7 +141,12 @@ class ReviewSession:
             selected_group = group & included_indexes
             if len(selected_group) > 1:
                 duplicate_indexes.update(selected_group)
-        invalid_indexes = self._invalid_indexes & included_indexes
+        authorized_indexes = {
+            index for index, row in self._records.iterrows()
+            if int(row["_FILA_ORIGEN"]) in self._authorized_documents
+            and index in self._invalid_indexes
+        }
+        invalid_indexes = (self._invalid_indexes - authorized_indexes) & included_indexes
         missing_indexes = set(self._missing_by_index) & included_indexes
         problem_indexes = duplicate_indexes | invalid_indexes | missing_indexes
 
@@ -111,8 +159,12 @@ class ReviewSession:
                 anomalies.append(f"Documento duplicado: {row['DOCUMENTO']}")
                 categories.add("duplicates")
             if index in self._invalid_indexes:
-                anomalies.append(f"Documento inválido: {row['DOCUMENTO']}")
-                categories.add("invalid")
+                if index in authorized_indexes:
+                    anomalies.append("Excepción documental autorizada.")
+                    categories.add("authorized_exception")
+                else:
+                    anomalies.append("Documento no estándar pendiente de autorización.")
+                    categories.add("nonstandard")
             if index in self._missing_by_index:
                 anomalies.append(
                     f"Campos obligatorios faltantes: {self._missing_by_index[index]}"
@@ -123,6 +175,8 @@ class ReviewSession:
                 categories.add("excluded")
             elif index in problem_indexes:
                 status = "Requiere revisión"
+            elif index in authorized_indexes:
+                status = "Excepción documental autorizada"
             else:
                 status = "Válido"
                 categories.add("valid")
@@ -137,6 +191,8 @@ class ReviewSession:
             "registros_validos": selected - len(problem_indexes),
             "documentos_faltantes": len(self._missing_document_indexes & included_indexes),
             "documentos_invalidos": len(invalid_indexes),
+            "documentos_no_estandar_pendientes": len(invalid_indexes),
+            "documentos_excepcion_autorizada": len(authorized_indexes & included_indexes),
             "filas_duplicadas": len(duplicate_indexes),
             "campos_informativos": len(missing_indexes),
             "unidades": units.nunique(dropna=False),
@@ -171,19 +227,31 @@ class CertificadosIcbfService:
     def final_records(self, records):
         return final_records(records)
 
-    def generate_pdf(self, records, rows_per_page=70, logo_path: str | Path | None = None):
-        self._ensure_ready(records)
+    def generate_pdf(self, records, rows_per_page=70, logo_path: str | Path | None = None,
+                     authorized_document_exceptions=frozenset()):
+        self._ensure_ready(records, authorized_document_exceptions)
         logo = Path(logo_path) if logo_path else self.logo_path
         if not logo.exists():
-            return generate_pdf(records, rows_per_page=rows_per_page)
-        return generate_pdf(records, rows_per_page=rows_per_page, logo_path=str(logo))
+            return generate_pdf(records, rows_per_page=rows_per_page,
+                                authorized_document_exceptions=authorized_document_exceptions)
+        return generate_pdf(records, rows_per_page=rows_per_page, logo_path=str(logo),
+                            authorized_document_exceptions=authorized_document_exceptions)
 
-    def generate_pdf_zip_by_unit(self, records, rows_per_page=25, logo_path: str | Path | None = None):
-        self._ensure_ready(records)
+    def generate_pdf_zip_by_unit(self, records, rows_per_page=25, logo_path: str | Path | None = None,
+                                 authorized_document_exceptions=frozenset(), generated_on=None):
+        self._ensure_ready(records, authorized_document_exceptions)
         logo = Path(logo_path) if logo_path else self.logo_path
         if not logo.exists():
-            return generate_pdf_zip_by_unit(records, rows_per_page=rows_per_page)
-        return generate_pdf_zip_by_unit(records, rows_per_page=rows_per_page, logo_path=str(logo))
+            return generate_pdf_zip_by_unit(
+                records, rows_per_page=rows_per_page,
+                authorized_document_exceptions=authorized_document_exceptions,
+                generated_on=generated_on,
+            )
+        return generate_pdf_zip_by_unit(
+            records, rows_per_page=rows_per_page, logo_path=str(logo),
+            authorized_document_exceptions=authorized_document_exceptions,
+            generated_on=generated_on,
+        )
 
     def build_email_text(self, records):
         return build_email_text(records)
@@ -278,9 +346,9 @@ class CertificadosIcbfService:
             raise ValueError(f"Tipo de salida desconocido: {output_type}")
         return patterns[output_type]
 
-    def _ensure_ready(self, records: pd.DataFrame) -> None:
-        availability = self.output_availability(records)
-        if not availability["ready"]:
+    def _ensure_ready(self, records: pd.DataFrame, authorized_document_exceptions=frozenset()) -> None:
+        validation = validate_records(records, authorized_document_exceptions)
+        if len(validation["active"]) == 0 or validation["blocking"]:
             raise ValueError("Los registros seleccionados todavía requieren revisión.")
 
     @staticmethod

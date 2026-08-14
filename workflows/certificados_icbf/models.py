@@ -127,9 +127,21 @@ class RecordsTableModel(QtCore.QAbstractTableModel):
     def anomalies_for_row(self, row: int) -> list[str]:
         return list(self._review["rows"][row]["anomalies"])
 
+    def authorize_document_exception(self, row: int) -> bool:
+        self._review = self._session.authorize_document_exception(row)
+        self.review_changed.emit(self._review)
+        self.dataChanged.emit(self.index(row, 0), self.index(row, self.columnCount() - 1))
+        return True
+
+    def revoke_document_exception(self, row: int) -> bool:
+        self._review = self._session.revoke_document_exception(row)
+        self.review_changed.emit(self._review)
+        self.dataChanged.emit(self.index(row, 0), self.index(row, self.columnCount() - 1))
+        return True
+
 
 class RecordsFilterProxyModel(QtCore.QSortFilterProxyModel):
-    FILTERS = {"all", "valid", "duplicates", "invalid", "missing", "included", "excluded"}
+    FILTERS = {"all", "valid", "duplicates", "nonstandard", "authorized_exception", "missing", "included", "excluded"}
 
     def __init__(self, parent: QtCore.QObject | None = None) -> None:
         super().__init__(parent)

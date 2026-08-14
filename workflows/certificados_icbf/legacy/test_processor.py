@@ -52,7 +52,7 @@ def test_validation_and_pdf():
     assert len(validation["duplicates"]) == 2
     assert len(validation["missing_document"]) == 1
 
-    records.loc[1, "DOCUMENTO"] = "101"
+    records.loc[1, "DOCUMENTO"] = "0000000101"
     records.loc[2, "INCLUIR"] = False
     validation = validate_records(records)
     assert validation["blocking"] is False

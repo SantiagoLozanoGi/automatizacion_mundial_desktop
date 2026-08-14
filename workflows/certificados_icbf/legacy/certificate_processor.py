@@ -102,8 +102,20 @@ def _text(value: object) -> str:
 
 
 def _document(value: object) -> str:
-    """Normalize document values to a consistent 10-digit string when possible."""
-    text = _text(value)
+    """Preserve textual identifiers and normalize only numeric Excel values."""
+    if value is None or (not isinstance(value, str) and pd.isna(value)):
+        return ""
+    if isinstance(value, Real) and not isinstance(value, bool):
+        numeric = float(value)
+        if isfinite(numeric) and numeric.is_integer():
+            text = str(int(numeric))
+            return text.zfill(10) if len(text) <= 10 else text
+    return str(value).strip()
+
+
+def _document_from_excel(value: object) -> str:
+    """Apply the historical zero-padding rule at the Excel ingestion boundary."""
+    text = _document(value)
     if re.fullmatch(r"\d+\.0", text):
         text = text[:-2]
     if text.isdigit() and len(text) <= 10:
@@ -128,6 +140,11 @@ def _sanitize_filename(name: object) -> str:
 def is_valid_document(value: object) -> bool:
     """Return True if the normalized document string is exactly 10 digits."""
     return bool(re.fullmatch(r"\d{10}", _document(value)))
+
+
+def is_standard_document(value: object) -> bool:
+    """Return True only for the standard ten-digit document format."""
+    return is_valid_document(value)
 
 
 def is_missing(value: object) -> bool:
@@ -239,7 +256,7 @@ def read_and_clean_excel(file_or_buffer: object) -> tuple[pd.DataFrame, dict[str
     for target in EDITABLE_COLUMNS[1:-1]:
         source = resolved[target]
         if target == "DOCUMENTO":
-            cleaned[target] = data[source].map(_document)
+            cleaned[target] = data[source].map(_document_from_excel)
         elif target == "FECHA DE NACIMIENTO":
             cleaned[target] = data[source].map(format_date)
         else:
@@ -306,7 +323,10 @@ def normalize_edited_records(records: pd.DataFrame) -> pd.DataFrame:
     return result[EDITABLE_COLUMNS].reset_index(drop=True)
 
 
-def validate_records(records: pd.DataFrame) -> dict[str, pd.DataFrame | bool]:
+def validate_records(
+    records: pd.DataFrame,
+    authorized_document_exceptions: set[int] | frozenset[int] = frozenset(),
+) -> dict[str, pd.DataFrame | bool]:
     """Validate the current records and classify all blocking issues.
 
     Returns a dictionary containing:
@@ -320,9 +340,12 @@ def validate_records(records: pd.DataFrame) -> dict[str, pd.DataFrame | bool]:
     active = normalize_edited_records(records)
     active = active.loc[active["INCLUIR"]].copy()
     missing_document = active.loc[active["DOCUMENTO"].map(is_missing)].copy()
-    invalid_document = active.loc[
+    nonstandard_document = active.loc[
         ~active["DOCUMENTO"].map(is_missing)
         & ~active["DOCUMENTO"].map(is_valid_document)
+    ].copy()
+    invalid_document = nonstandard_document.loc[
+        ~nonstandard_document["_FILA_ORIGEN"].isin(authorized_document_exceptions)
     ].copy()
 
     valid_docs = active.loc[active["DOCUMENTO"].map(is_valid_document), "DOCUMENTO"]
@@ -351,19 +374,23 @@ def validate_records(records: pd.DataFrame) -> dict[str, pd.DataFrame | bool]:
         "active": active,
         "missing_document": missing_document,
         "invalid_document": invalid_document,
+        "nonstandard_document": nonstandard_document,
         "duplicates": duplicates,
         "missing_report": missing_report,
         "blocking": blocking,
     }
 
 
-def final_records(records: pd.DataFrame) -> pd.DataFrame:
+def final_records(
+    records: pd.DataFrame,
+    authorized_document_exceptions: set[int] | frozenset[int] = frozenset(),
+) -> pd.DataFrame:
     """Return the final sorted and numbered records that will be printed to PDF.
 
     This function ensures the current records are fully valid for PDF generation,
     sorts them first by unit and then by name, and adds a sequential "N°" column.
     """
-    validation = validate_records(records)
+    validation = validate_records(records, authorized_document_exceptions)
     if validation["blocking"]:
         raise ValueError(
             "Todavía existen campos obligatorios faltantes, documentos inválidos "
@@ -592,10 +619,11 @@ def generate_pdf(
     records: pd.DataFrame,
     rows_per_page: int = DEFAULT_ROWS_PER_PAGE,
     logo_path: str | Path | None = None,
+    authorized_document_exceptions: set[int] | frozenset[int] = frozenset(),
 ) -> bytes:
     """Generate a single PDF file containing all validated records."""
     return _build_pdf_bytes(
-        final_records(records),
+        final_records(records, authorized_document_exceptions),
         rows_per_page=rows_per_page,
         logo_path=logo_path,
     )
@@ -605,10 +633,13 @@ def generate_pdf_zip_by_unit(
     records: pd.DataFrame,
     rows_per_page: int = DEFAULT_ROWS_PER_PAGE,
     logo_path: str | Path | None = None,
+    authorized_document_exceptions: set[int] | frozenset[int] = frozenset(),
+    generated_on: date | None = None,
 ) -> bytes:
     """Generate a ZIP archive of separate PDFs, one per UNIDADES group."""
     try:
-        frame = final_records(records)
+        frame = final_records(records, authorized_document_exceptions)
+        stamp = (generated_on or date.today()).strftime("%d-%m-%Y")
         buffer = BytesIO()
         with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
             for unit, group in frame.groupby("UNIDADES", sort=False, dropna=False):
@@ -621,7 +652,7 @@ def generate_pdf_zip_by_unit(
                     rows_per_page=rows_per_page,
                     logo_path=logo_path,
                 )
-                archive.writestr(f"{unit_label}.pdf", pdf_bytes)
+                archive.writestr(f"CERTIFICADOS_{unit_label}_{stamp}.pdf", pdf_bytes)
 
         buffer.seek(0)
         zip_bytes = buffer.getvalue()
