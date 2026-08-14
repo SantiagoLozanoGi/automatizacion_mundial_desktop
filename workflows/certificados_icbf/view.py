@@ -4,12 +4,13 @@ from pathlib import Path
 
 from PySide6 import QtCore, QtWidgets
 
+from app.file_io import save_bytes_to_file
 from workflows.certificados_icbf.models import RecordsFilterProxyModel, RecordsTableModel
 from workflows.certificados_icbf.service import service
 
 
 class ExcelProcessorWorker(QtCore.QObject):
-    succeeded = QtCore.Signal(object, object)
+    succeeded = QtCore.Signal(object, object, str)
     failed = QtCore.Signal(str)
     finished = QtCore.Signal()
 
@@ -21,9 +22,36 @@ class ExcelProcessorWorker(QtCore.QObject):
     def run(self) -> None:
         try:
             records, stats = service.read_and_clean_excel(self.file_path)
-            self.succeeded.emit(records, stats)
+            email_text = service.build_email_text(records)
+            self.succeeded.emit(records, stats, email_text)
         except Exception as error:
             self.failed.emit(str(error))
+        finally:
+            self.finished.emit()
+
+
+class OutputGenerationWorker(QtCore.QObject):
+    succeeded = QtCore.Signal(str, object)
+    failed = QtCore.Signal(str, str)
+    finished = QtCore.Signal()
+
+    def __init__(self, output_type: str, records) -> None:
+        super().__init__()
+        self.output_type = output_type
+        self.records = records.copy(deep=True)
+
+    @QtCore.Slot()
+    def run(self) -> None:
+        try:
+            if self.output_type == "pdf":
+                content = service.generate_pdf(self.records)
+            elif self.output_type == "zip":
+                content = service.generate_pdf_zip_by_unit(self.records)
+            else:
+                raise ValueError("Tipo de generación no compatible.")
+            self.succeeded.emit(self.output_type, content)
+        except Exception as error:
+            self.failed.emit(self.output_type, str(error))
         finally:
             self.finished.emit()
 
@@ -49,6 +77,9 @@ class CertificadosIcbfView(QtWidgets.QWidget):
         self.proxy_model: RecordsFilterProxyModel | None = None
         self._thread: QtCore.QThread | None = None
         self._worker: ExcelProcessorWorker | None = None
+        self._output_thread: QtCore.QThread | None = None
+        self._output_worker: OutputGenerationWorker | None = None
+        self._email_is_current = False
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -79,6 +110,7 @@ class CertificadosIcbfView(QtWidgets.QWidget):
         layout.addWidget(self.status)
         self._build_summary(layout)
         self._build_review_area(layout)
+        self._build_outputs(layout)
 
     def _build_summary(self, parent_layout: QtWidgets.QVBoxLayout) -> None:
         self.summary_group = QtWidgets.QGroupBox("Resumen de validación")
@@ -163,6 +195,49 @@ class CertificadosIcbfView(QtWidgets.QWidget):
         self.review_widget.setVisible(False)
         parent_layout.addWidget(self.review_widget, 1)
 
+    def _build_outputs(self, parent_layout: QtWidgets.QVBoxLayout) -> None:
+        self.outputs_group = QtWidgets.QGroupBox("3. Generar archivos")
+        output_layout = QtWidgets.QVBoxLayout(self.outputs_group)
+        self.stage_label = QtWidgets.QLabel(
+            "1. Cargar archivo  ✓    2. Revisar información    3. Generar archivos"
+        )
+        output_layout.addWidget(self.stage_label)
+
+        actions = QtWidgets.QGridLayout()
+        self.pdf_button = QtWidgets.QPushButton("Guardar PDF general")
+        self.zip_button = QtWidgets.QPushButton("Guardar ZIP por unidad")
+        self.duplicates_button = QtWidgets.QPushButton("Guardar reporte de duplicados")
+        self.missing_button = QtWidgets.QPushButton("Guardar reporte de campos faltantes")
+        self.pdf_button.clicked.connect(lambda: self._start_generation("pdf"))
+        self.zip_button.clicked.connect(lambda: self._start_generation("zip"))
+        self.duplicates_button.clicked.connect(lambda: self._save_report("duplicates"))
+        self.missing_button.clicked.connect(lambda: self._save_report("missing"))
+        for index, button in enumerate(
+            [self.pdf_button, self.zip_button, self.duplicates_button, self.missing_button]
+        ):
+            actions.addWidget(button, index // 2, index % 2)
+        output_layout.addLayout(actions)
+
+        output_layout.addWidget(QtWidgets.QLabel("Texto sugerido para correo"))
+        self.email_text = QtWidgets.QPlainTextEdit()
+        self.email_text.setReadOnly(True)
+        self.email_text.setMaximumHeight(125)
+        output_layout.addWidget(self.email_text)
+        email_actions = QtWidgets.QHBoxLayout()
+        self.refresh_email_button = QtWidgets.QPushButton("Actualizar texto")
+        self.refresh_email_button.clicked.connect(self._refresh_email_text)
+        email_actions.addWidget(self.refresh_email_button)
+        self.copy_email_button = QtWidgets.QPushButton("Copiar al portapapeles")
+        self.copy_email_button.clicked.connect(self._copy_email_text)
+        email_actions.addWidget(self.copy_email_button)
+        email_actions.addStretch()
+        output_layout.addLayout(email_actions)
+        self.generation_status = QtWidgets.QLabel()
+        self.generation_status.setWordWrap(True)
+        output_layout.addWidget(self.generation_status)
+        self.outputs_group.setVisible(False)
+        parent_layout.addWidget(self.outputs_group)
+
     @QtCore.Slot()
     def _select_file(self) -> None:
         selected, _ = QtWidgets.QFileDialog.getOpenFileName(
@@ -180,6 +255,7 @@ class CertificadosIcbfView(QtWidgets.QWidget):
         self.status.setText("Archivo listo para procesar.")
         self.summary_group.setVisible(False)
         self.review_widget.setVisible(False)
+        self.outputs_group.setVisible(False)
 
     @QtCore.Slot()
     def _process_file(self) -> None:
@@ -199,8 +275,8 @@ class CertificadosIcbfView(QtWidgets.QWidget):
         self._thread.finished.connect(self._processing_finished)
         self._thread.start()
 
-    @QtCore.Slot(object, object)
-    def _show_results(self, records, stats: dict) -> None:
+    @QtCore.Slot(object, object, str)
+    def _show_results(self, records, stats: dict, email_text: str = "") -> None:
         self.records = records.copy(deep=True)
         self.stats = stats
         self.table_model = RecordsTableModel(self.records)
@@ -214,6 +290,9 @@ class CertificadosIcbfView(QtWidgets.QWidget):
         self.filter_combo.setCurrentIndex(0)
         self.summary_group.setVisible(True)
         self.review_widget.setVisible(True)
+        self.outputs_group.setVisible(True)
+        self.email_text.setPlainText(email_text or service.build_email_text(records))
+        self._email_is_current = True
         self._review_changed(self.table_model.review)
         self.status.setText("Procesamiento completado. Revisa los registros y sus anomalías.")
 
@@ -222,6 +301,8 @@ class CertificadosIcbfView(QtWidgets.QWidget):
         if self.table_model is None or self.stats is None:
             return
         self.records = self.table_model.records
+        if self.sender() is self.table_model:
+            self._email_is_current = False
         summary = review["summary"]
         values = {
             "recibidos": self.stats["recibidos"], "procesables": self.stats["ingresos"],
@@ -237,6 +318,22 @@ class CertificadosIcbfView(QtWidgets.QWidget):
         self.workflow_status.setText(f"Estado del archivo: {review['status']}")
         self.blocking_reason.setText(review["blocking_reason"])
         self.continue_button.setEnabled(bool(review["ready"]))
+        self.continue_button.setText("Ir a generación")
+        self.stage_label.setText(
+            "1. Cargar archivo  ✓    2. Revisar información  ✓    3. Generar archivos  ←"
+            if review["ready"]
+            else "1. Cargar archivo  ✓    2. Revisar información  ←    3. Generar archivos"
+        )
+        self.pdf_button.setEnabled(bool(review["ready"]) and self._output_thread is None)
+        self.zip_button.setEnabled(bool(review["ready"]) and self._output_thread is None)
+        self.duplicates_button.setEnabled(bool(summary["filas_duplicadas"]))
+        self.missing_button.setEnabled(bool(summary["campos_informativos"]))
+        if self._email_is_current and self.records is not None:
+            self._email_is_current = self.records.equals(self.table_model.records)
+        if not self._email_is_current:
+            self.generation_status.setText(
+                "La selección cambió. Actualiza o copia el texto para reflejar los registros actuales."
+            )
         if self.proxy_model is not None:
             self.proxy_model.set_category(self.filter_combo.currentData())
             self._update_visible_count()
@@ -268,9 +365,114 @@ class CertificadosIcbfView(QtWidgets.QWidget):
 
     @QtCore.Slot()
     def _continue_to_generation(self) -> None:
-        QtWidgets.QMessageBox.information(
-            self, "Datos listos", "Los registros seleccionados están listos. La generación estará disponible en v0.3.0."
+        self.outputs_group.setFocus(QtCore.Qt.OtherFocusReason)
+        self.generation_status.setText("Los datos están listos. Selecciona una salida para generarla.")
+
+    def _start_generation(self, output_type: str) -> None:
+        if self.table_model is None or not self.table_model.review["ready"]:
+            QtWidgets.QMessageBox.warning(
+                self, "Generación bloqueada", "Los registros seleccionados todavía requieren revisión."
+            )
+            return
+        self._set_generation_busy(True, output_type)
+        self._output_thread = QtCore.QThread(self)
+        self._output_worker = OutputGenerationWorker(output_type, self.table_model.records)
+        self._output_worker.moveToThread(self._output_thread)
+        self._output_thread.started.connect(self._output_worker.run)
+        self._output_worker.succeeded.connect(self._generation_succeeded)
+        self._output_worker.failed.connect(self._generation_failed)
+        self._output_worker.finished.connect(self._output_thread.quit)
+        self._output_worker.finished.connect(self._output_worker.deleteLater)
+        self._output_thread.finished.connect(self._output_thread.deleteLater)
+        self._output_thread.finished.connect(self._generation_finished)
+        self._output_thread.start()
+
+    @QtCore.Slot(str, object)
+    def _generation_succeeded(self, output_type: str, content: bytes) -> None:
+        self._request_save(content, output_type)
+
+    @QtCore.Slot(str, str)
+    def _generation_failed(self, output_type: str, technical_detail: str) -> None:
+        self.generation_status.setText(f"Detalle técnico: {technical_detail}")
+        QtWidgets.QMessageBox.critical(
+            self, "No se pudo generar", f"No fue posible generar la salida {output_type.upper()}. Puedes volver a intentarlo."
         )
+
+    @QtCore.Slot()
+    def _generation_finished(self) -> None:
+        self._output_thread = None
+        self._output_worker = None
+        if self.table_model is not None:
+            self._review_changed(self.table_model.review)
+
+    def _set_generation_busy(self, busy: bool, output_type: str = "") -> None:
+        self.pdf_button.setEnabled(not busy and bool(self.table_model and self.table_model.review["ready"]))
+        self.zip_button.setEnabled(not busy and bool(self.table_model and self.table_model.review["ready"]))
+        if busy:
+            self.generation_status.setText(f"Generando {output_type.upper()}…")
+
+    def _save_report(self, report_type: str) -> None:
+        if self.table_model is None:
+            return
+        try:
+            if report_type == "duplicates":
+                content = service.generate_duplicates_report(self.table_model.records)
+            else:
+                content = service.generate_missing_fields_report(self.table_model.records)
+            self._request_save(content, report_type)
+        except Exception as error:
+            self.generation_status.setText(f"Detalle técnico: {error}")
+            QtWidgets.QMessageBox.critical(
+                self, "No se pudo generar", "No fue posible preparar el reporte. Puedes volver a intentarlo."
+            )
+
+    def _request_save(self, content: bytes, output_type: str) -> None:
+        if self.file_path is None:
+            return
+        filename = service.suggested_filename(self.file_path, output_type)
+        filters = {
+            "pdf": "Archivo PDF (*.pdf)", "zip": "Archivo ZIP (*.zip)",
+            "duplicates": "Archivo Excel (*.xlsx)", "missing": "Archivo Excel (*.xlsx)",
+        }
+        destination, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, "Guardar archivo", filename, filters[output_type]
+        )
+        if not destination:
+            self.generation_status.setText("Guardado cancelado por el usuario.")
+            return
+        try:
+            saved_path = save_bytes_to_file(destination, content)
+        except Exception as error:
+            self.generation_status.setText(f"Detalle técnico: {error}")
+            QtWidgets.QMessageBox.critical(
+                self, "No se pudo guardar", "No fue posible escribir el archivo en la ubicación seleccionada."
+            )
+            return
+        self.generation_status.setText(f"Archivo guardado correctamente: {saved_path}")
+        QtWidgets.QMessageBox.information(
+            self, "Guardado completo", f"Archivo guardado correctamente.\n\n{saved_path}"
+        )
+
+    def _copy_email_text(self) -> None:
+        if self.table_model is None:
+            return
+        if not self._email_is_current:
+            self._refresh_email_text()
+        QtWidgets.QApplication.clipboard().setText(self.email_text.toPlainText())
+        self.generation_status.setText("Texto sugerido copiado al portapapeles.")
+
+    def _refresh_email_text(self) -> None:
+        if self.table_model is None:
+            return
+        try:
+            self.email_text.setPlainText(service.build_email_text(self.table_model.records))
+            self._email_is_current = True
+            self.generation_status.setText("Texto sugerido actualizado.")
+        except Exception as error:
+            self.generation_status.setText(f"Detalle técnico: {error}")
+            QtWidgets.QMessageBox.critical(
+                self, "No se pudo actualizar", "No fue posible actualizar el texto sugerido."
+            )
 
     @QtCore.Slot(str)
     def _show_error(self, message: str) -> None:

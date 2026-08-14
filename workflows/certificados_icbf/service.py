@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
+import re
 from typing import Any
 
 import pandas as pd
@@ -36,9 +38,16 @@ class ReviewSession:
         validation = validate_records(validation_input)
         self._invalid_indexes = set(validation["invalid_document"].index)
         self._missing_document_indexes = set(validation["missing_document"].index)
+        index_by_source_row = {
+            source_row: index
+            for index, source_row in self._records["_FILA_ORIGEN"].items()
+        }
         self._missing_by_index = {
-            index: str(row["CAMPOS OBLIGATORIOS FALTANTES"])
-            for index, row in validation["missing_report"].iterrows()
+            index_by_source_row[row["_FILA_ORIGEN"]]: str(
+                row["CAMPOS OBLIGATORIOS FALTANTES"]
+            )
+            for _, row in validation["missing_report"].iterrows()
+            if row["_FILA_ORIGEN"] in index_by_source_row
         }
         self._duplicate_groups = [
             set(group.index)
@@ -139,12 +148,14 @@ class CertificadosIcbfService:
         return final_records(records)
 
     def generate_pdf(self, records, rows_per_page=25, logo_path: str | Path | None = None):
+        self._ensure_ready(records)
         logo = Path(logo_path) if logo_path else self.logo_path
         if not logo.exists():
             return generate_pdf(records, rows_per_page=rows_per_page)
         return generate_pdf(records, rows_per_page=rows_per_page, logo_path=str(logo))
 
     def generate_pdf_zip_by_unit(self, records, rows_per_page=25, logo_path: str | Path | None = None):
+        self._ensure_ready(records)
         logo = Path(logo_path) if logo_path else self.logo_path
         if not logo.exists():
             return generate_pdf_zip_by_unit(records, rows_per_page=rows_per_page)
@@ -175,6 +186,54 @@ class CertificadosIcbfService:
 
     def create_review_session(self, records: pd.DataFrame) -> ReviewSession:
         return ReviewSession(records)
+
+    def output_availability(self, records: pd.DataFrame) -> dict[str, Any]:
+        validation = validate_records(records)
+        selected = len(validation["active"])
+        ready = selected > 0 and not bool(validation["blocking"])
+        return {
+            "ready": ready,
+            "selected": selected,
+            "duplicates": len(validation["duplicates"]),
+            "missing": len(validation["missing_report"]),
+            "email_text": build_email_text(records),
+        }
+
+    def generate_duplicates_report(self, records: pd.DataFrame) -> bytes:
+        duplicates = validate_records(records)["duplicates"]
+        if duplicates.empty:
+            raise ValueError("No hay documentos duplicados incluidos para reportar.")
+        return dataframe_to_excel_bytes({"Duplicados": duplicates})
+
+    def generate_missing_fields_report(self, records: pd.DataFrame) -> bytes:
+        missing = validate_records(records)["missing_report"]
+        if missing.empty:
+            raise ValueError("No hay campos obligatorios faltantes incluidos para reportar.")
+        return dataframe_to_excel_bytes({"Campos faltantes": missing})
+
+    def suggested_filename(
+        self,
+        source_path: str | Path,
+        output_type: str,
+        generated_on: date | None = None,
+    ) -> str:
+        source_name = Path(source_path).stem
+        safe_base = re.sub(r'[<>:"/\\|?*]+', "-", source_name).strip(" .-") or "ARCHIVO"
+        stamp = (generated_on or date.today()).strftime("%Y%m%d")
+        patterns = {
+            "pdf": f"CERTIFICADO-{safe_base}-{stamp}.pdf",
+            "zip": f"CERTIFICADO-{safe_base}-{stamp}.zip",
+            "duplicates": f"REPORTE-DUPLICADOS-{safe_base}-{stamp}.xlsx",
+            "missing": f"REPORTE-CAMPOS-FALTANTES-{safe_base}-{stamp}.xlsx",
+        }
+        if output_type not in patterns:
+            raise ValueError(f"Tipo de salida desconocido: {output_type}")
+        return patterns[output_type]
+
+    def _ensure_ready(self, records: pd.DataFrame) -> None:
+        availability = self.output_availability(records)
+        if not availability["ready"]:
+            raise ValueError("Los registros seleccionados todavía requieren revisión.")
 
     @staticmethod
     def _blocking_reason(summary: dict[str, Any], selected: int) -> str:

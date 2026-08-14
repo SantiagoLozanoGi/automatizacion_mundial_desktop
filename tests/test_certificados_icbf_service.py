@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 from io import BytesIO
+from datetime import date
 import zipfile
 
 import pandas as pd
+from openpyxl import load_workbook
 from pypdf import PdfReader
 
 from workflows.certificados_icbf.service import CertificadosIcbfService
+from app.file_io import save_bytes_to_file
 
 
 def build_source() -> BytesIO:
@@ -145,3 +148,87 @@ def test_review_session_reuses_validation_and_revalidates_business_edits(monkeyp
     refreshed = session.revalidate(edited)
     assert calls == 2
     assert "invalid" in refreshed["rows"][0]["categories"]
+
+
+def test_service_generates_anomaly_reports_for_included_records() -> None:
+    workflow_service = CertificadosIcbfService()
+    records, _ = workflow_service.read_and_clean_excel(build_source())
+    records.loc[1, "DOCUMENTO"] = records.loc[0, "DOCUMENTO"]
+    records.loc[0, "UNIDADES"] = ""
+
+    duplicates = workflow_service.generate_duplicates_report(records)
+    missing = workflow_service.generate_missing_fields_report(records)
+    availability = workflow_service.output_availability(records)
+
+    assert duplicates.startswith(b"PK")
+    assert missing.startswith(b"PK")
+    assert availability["duplicates"] == 2
+    assert availability["missing"] == 1
+    assert availability["ready"] is False
+    duplicate_book = load_workbook(BytesIO(duplicates), read_only=True)
+    missing_book = load_workbook(BytesIO(missing), read_only=True)
+    assert duplicate_book.sheetnames == ["Duplicados"]
+    assert duplicate_book["Duplicados"].max_row == 3
+    assert missing_book.sheetnames == ["Campos faltantes"]
+    assert missing_book["Campos faltantes"].max_row == 2
+
+    records.loc[1, "INCLUIR"] = False
+    assert workflow_service.output_availability(records)["duplicates"] == 0
+    try:
+        workflow_service.generate_duplicates_report(records)
+    except ValueError as error:
+        assert "No hay" in str(error)
+    else:
+        raise AssertionError("No se debía generar un reporte vacío.")
+
+
+def test_service_output_names_and_file_writer(tmp_path) -> None:
+    workflow_service = CertificadosIcbfService()
+    filename = workflow_service.suggested_filename(
+        "entrada real.xlsx", "pdf", generated_on=date(2026, 8, 13)
+    )
+    destination = save_bytes_to_file(tmp_path / filename, b"%PDF-test")
+
+    assert filename == "CERTIFICADO-entrada real-20260813.pdf"
+    assert destination.read_bytes() == b"%PDF-test"
+
+
+def test_service_blocks_certificate_outputs_until_records_are_ready() -> None:
+    workflow_service = CertificadosIcbfService()
+    records, _ = workflow_service.read_and_clean_excel(build_source())
+    records.loc[0, "DOCUMENTO"] = "INVALIDO"
+
+    try:
+        workflow_service.generate_pdf(records)
+    except ValueError as error:
+        assert "requieren revisión" in str(error)
+    else:
+        raise AssertionError("El service no debía generar un PDF bloqueado.")
+
+
+def test_review_maps_missing_fields_to_original_source_row() -> None:
+    workflow_service = CertificadosIcbfService()
+    records, _ = workflow_service.read_and_clean_excel(build_source())
+    records.loc[1, "UNIDADES"] = ""
+
+    review = workflow_service.review_records(records)
+
+    assert "missing" not in review["rows"][0]["categories"]
+    assert "missing" in review["rows"][1]["categories"]
+    updated = workflow_service.set_included(records, 1, False)
+    assert workflow_service.output_availability(updated)["ready"] is True
+
+
+def test_certificate_outputs_respect_include_selection() -> None:
+    workflow_service = CertificadosIcbfService()
+    records, _ = workflow_service.read_and_clean_excel(build_source())
+    selected = workflow_service.set_included(records, 1, False)
+
+    pdf = workflow_service.generate_pdf(selected)
+    archive = workflow_service.generate_pdf_zip_by_unit(selected)
+    pdf_text = "\n".join(page.extract_text() or "" for page in PdfReader(BytesIO(pdf)).pages)
+
+    assert "Ana" in pdf_text
+    assert "Luis" not in pdf_text
+    with zipfile.ZipFile(BytesIO(archive)) as zipped:
+        assert zipped.namelist() == ["Bogotá.pdf"]

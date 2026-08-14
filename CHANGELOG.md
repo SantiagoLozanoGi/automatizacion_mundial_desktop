@@ -2,6 +2,21 @@
 
 Todos los cambios relevantes de la aplicación se documentarán en este archivo.
 
+## [0.3.0] - 2026-08-13
+
+### Añadido
+
+- Generación y guardado de PDF general mediante la aplicación.
+- Generación asíncrona de ZIP con PDFs por unidad.
+- Reportes Excel de duplicados y campos obligatorios faltantes cuando aplican.
+- Texto sugerido para correo con actualización y copia al portapapeles.
+- Nombres sugeridos centralizados y escritura reutilizable de salidas en disco.
+- Estados de generación, prevención de ejecuciones dobles y manejo recuperable de errores.
+
+### Corregido
+
+- Asociación de campos faltantes con la fila correcta mediante `_FILA_ORIGEN`.
+
 ## [0.2.0] - 2026-08-13
 
 ### Añadido
