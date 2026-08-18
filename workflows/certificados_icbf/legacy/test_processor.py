@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 from io import BytesIO
+import zipfile
 
 import pandas as pd
 from pypdf import PdfReader
 
 from workflows.certificados_icbf.legacy.certificate_processor import (
     InputFormatError,
+    _register_font,
+    _unit_text_layout,
     _paginate,
     final_records,
     generate_pdf,
@@ -146,6 +149,47 @@ def test_generate_pdf_with_seventy_rows_same_unit():
     assert pdf.startswith(b"%PDF")
     pages = PdfReader(BytesIO(pdf)).pages
     assert len(pages) == 1
+
+
+def test_long_unit_names_wrap_in_general_pdf_and_unit_zip():
+    """Unit names remain complete when the PDF renderer wraps them."""
+    units = [
+        "UNIDAD PRUEBA",
+        "CENTRO INFANTIL UNIDAD PRUEBA",
+        "CENTRO DE DESARROLLO INFANTIL UNIDAD DE PRUEBA EXTENSA",
+    ]
+    regular_font, _ = _register_font()
+    expected_lines = [1, 2, 3]
+    for unit, line_count in zip(units, expected_lines):
+        font_size, lines = _unit_text_layout(unit, 104, regular_font, 6)
+        assert font_size >= 5.5
+        assert len(lines) == line_count
+        assert " ".join(lines) == unit
+
+    source = build_source([
+        ["Ana", None, "PÃ©rez", None, str(100 + index), "01/01/2010", unit, "INGRESO"]
+        for index, unit in enumerate(units)
+    ])
+    records, _ = read_and_clean_excel(source)
+
+    pdf = generate_pdf(records)
+    assert pdf.startswith(b"%PDF")
+    general_text = "\n".join(page.extract_text() or "" for page in PdfReader(BytesIO(pdf)).pages)
+    for word in units[-1].split():
+        assert word in general_text
+
+    zip_bytes = generate_pdf_zip_by_unit(records)
+    with zipfile.ZipFile(BytesIO(zip_bytes)) as archive:
+        unit_pdfs = [archive.read(name) for name in archive.namelist()]
+    assert len(unit_pdfs) == len(units)
+    zip_text = "\n".join(
+        page.extract_text() or ""
+        for unit_pdf in unit_pdfs
+        for page in PdfReader(BytesIO(unit_pdf)).pages
+    )
+    for unit in units:
+        for word in unit.split():
+            assert word in zip_text
 
 
 def test_invalid_excel_file_raises_clear_error():

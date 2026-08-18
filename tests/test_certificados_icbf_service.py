@@ -55,7 +55,7 @@ def test_service_generates_pdf_and_zip_with_configured_logo() -> None:
     records, _ = service.read_and_clean_excel(build_source())
 
     pdf_bytes = service.generate_pdf(records)
-    zip_bytes = service.generate_pdf_zip_by_unit(records)
+    zip_bytes = service.generate_pdf_zip_by_unit(records, generated_on=date(2026, 8, 14))
 
     assert pdf_bytes.startswith(b"%PDF")
     assert len(PdfReader(BytesIO(pdf_bytes)).pages) == 1
@@ -248,7 +248,7 @@ def test_certificate_outputs_respect_include_selection() -> None:
     selected = workflow_service.set_included(records, 1, False)
 
     pdf = workflow_service.generate_pdf(selected)
-    archive = workflow_service.generate_pdf_zip_by_unit(selected)
+    archive = workflow_service.generate_pdf_zip_by_unit(selected, generated_on=date(2026, 8, 14))
     pdf_text = "\n".join(page.extract_text() or "" for page in PdfReader(BytesIO(pdf)).pages)
 
     assert "Ana" in pdf_text

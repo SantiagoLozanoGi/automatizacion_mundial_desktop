@@ -508,6 +508,72 @@ def _fit_text(pdf: canvas.Canvas, text: object, max_width: float, font: str, siz
     return candidate
 
 
+def _wrap_text(text: object, max_width: float, font: str, size: float) -> list[str]:
+    """Wrap text on word boundaries, splitting a word only as a last resort."""
+    words = _text(text).split()
+    if not words:
+        return [""]
+
+    lines: list[str] = []
+    current = ""
+    for word in words:
+        candidate = f"{current} {word}".strip()
+        if not current:
+            current = word
+        elif pdfmetrics.stringWidth(candidate, font, size) <= max_width:
+            current = candidate
+            continue
+        else:
+            lines.append(current)
+            current = word
+        while pdfmetrics.stringWidth(current, font, size) > max_width:
+            split_at = max(1, len(current) - 1)
+            while split_at > 1 and pdfmetrics.stringWidth(current[:split_at], font, size) > max_width:
+                split_at -= 1
+            lines.append(current[:split_at])
+            current = current[split_at:]
+    lines.append(current)
+    return lines
+
+
+def _unit_text_layout(value: object, max_width: float, font: str, normal_size: float) -> tuple[float, list[str]]:
+    """Return the largest readable unit font and its complete wrapped lines."""
+    size = normal_size
+    while size > 5.5:
+        lines = _wrap_text(value, max_width, font, size)
+        if len(lines) <= 3:
+            return size, lines
+        size -= 0.25
+    return 5.5, _wrap_text(value, max_width, font, 5.5)
+
+
+def _paginate_by_height(frame: pd.DataFrame, row_heights: list[float], available_height: float) -> list[list[int]]:
+    """Paginate real row heights while retaining unit groups whenever they fit."""
+    groups = [list(group.index) for _, group in frame.groupby("UNIDADES", sort=False, dropna=False)]
+    pages: list[list[int]] = []
+    current: list[int] = []
+    used_height = 0.0
+
+    def add_page() -> None:
+        nonlocal current, used_height
+        if current:
+            pages.append(current)
+        current, used_height = [], 0.0
+
+    for group in groups:
+        group_height = sum(row_heights[index] for index in group)
+        if current and used_height + group_height > available_height + 0.01:
+            add_page()
+        for index in group:
+            height = row_heights[index]
+            if current and used_height + height > available_height + 0.01:
+                add_page()
+            current.append(index)
+            used_height += height
+    add_page()
+    return pages or [[]]
+
+
 def _build_pdf_bytes(
     frame: pd.DataFrame,
     rows_per_page: int = DEFAULT_ROWS_PER_PAGE,
@@ -519,7 +585,6 @@ def _build_pdf_bytes(
     dynamic row height based on available page space.
     """
     try:
-        pages = _paginate(frame, rows_per_page=rows_per_page)
         buffer = BytesIO()
         page_width, page_height = A4
         pdf = canvas.Canvas(buffer, pagesize=(page_width, page_height))
@@ -544,8 +609,20 @@ def _build_pdf_bytes(
         footer_margin = 20
         widths = [22, 65, 68, 65, 68, 74, 74, 109]
         headers = OUTPUT_COLUMNS
+        available_height = top - footer_margin - header_height
+        normal_row_height = min(19.0, max(7.0, available_height / max(rows_per_page, 1)))
+        normal_font_size = min(9.5, max(6.0, normal_row_height * 0.55))
+        unit_width = widths[headers.index("UNIDADES")] - 5
+        layouts: list[tuple[float, list[str]]] = []
+        row_heights: list[float] = []
+        for value in frame["UNIDADES"]:
+            unit_size, unit_lines = _unit_text_layout(value, unit_width, regular_font, normal_font_size)
+            wrapped_height = len(unit_lines) * unit_size * 1.15 + 4
+            row_heights.append(normal_row_height if len(unit_lines) == 1 else max(normal_row_height, wrapped_height))
+            layouts.append((unit_size, unit_lines))
+        pages = _paginate_by_height(frame, row_heights, available_height)
 
-        for page_number, page_rows in enumerate(pages, start=1):
+        for page_number, page_indexes in enumerate(pages, start=1):
             if logo:
                 pdf.drawImage(
                     logo,
@@ -556,10 +633,6 @@ def _build_pdf_bytes(
                     preserveAspectRatio=True,
                     mask="auto",
                 )
-
-            rows_count = len(page_rows)
-            available_height = top - footer_margin - header_height
-            row_height = min(19.0, max(7.0, available_height / max(rows_count, 1)))
 
             y = top
             pdf.setFillColor(colors.HexColor("#99CCFF"))
@@ -582,12 +655,24 @@ def _build_pdf_bytes(
                 x += width
             y -= header_height
 
-            for row in page_rows:
+            for index in page_indexes:
+                row = frame.iloc[index]
+                row_height = row_heights[index]
                 x = left
                 for width, column in zip(widths, headers):
                     pdf.rect(x, y - row_height, width, row_height, fill=0, stroke=1)
                     value = row[column]
                     pdf.setFillColor(colors.black)
+                    if column == "UNIDADES":
+                        unit_size, unit_lines = layouts[index]
+                        pdf.setFont(regular_font, unit_size)
+                        line_height = unit_size * 1.15
+                        text_y = y - row_height / 2 + (len(unit_lines) - 1) * line_height / 2 - unit_size * 0.25
+                        for line in unit_lines:
+                            pdf.drawCentredString(x + width / 2, text_y, line)
+                            text_y -= line_height
+                        x += width
+                        continue
                     font_size = _fit_text(
                         pdf,
                         value,
