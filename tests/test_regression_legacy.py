@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from io import BytesIO
 import zipfile
 
@@ -15,8 +15,10 @@ from workflows.certificados_icbf.legacy.certificate_processor import (
     format_date,
     generate_pdf,
     generate_pdf_zip_by_unit,
+    normalize_unit_key,
     read_and_clean_excel,
     validate_records,
+    validation_summary,
 )
 
 
@@ -195,6 +197,42 @@ def test_pagination_splits_only_unit_larger_than_capacity():
 
     assert [len(page) for page in pages] == [70, 15]
     assert all({row["UNIDADES"] for row in page} == {"UNIDAD GRANDE"} for page in pages)
+
+
+def test_normalize_unit_key_equates_only_separator_space_and_case_variants():
+    variants = [
+        "123_UNIDAD_PRUEBA",
+        "123 - UNIDAD PRUEBA",
+        "123-UNIDAD PRUEBA",
+        " 123_UNIDAD  prueba ",
+    ]
+    assert {normalize_unit_key(value) for value in variants} == {"123 UNIDAD PRUEBA"}
+    assert normalize_unit_key("124_UNIDAD_PRUEBA") == "124 UNIDAD PRUEBA"
+    assert normalize_unit_key("124_UNIDAD_PRUEBA") != normalize_unit_key("123_UNIDAD_PRUEBA")
+
+
+def test_unit_variants_share_pdf_zip_and_summary_but_keep_first_visible_name():
+    source = build_source([
+        ["Ana", None, "PÃ©rez", None, "123", "01/01/2010", "123_UNIDAD_PRUEBA", "INGRESO"],
+        ["Luis", None, "GÃ³mez", None, "456", "02/02/2011", "123 - Unidad Prueba", "INGRESO"],
+        ["Eva", None, "Rojas", None, "789", "03/03/2012", "456_OTRA UNIDAD", "INGRESO"],
+    ])
+    records, _ = read_and_clean_excel(source)
+
+    assert validation_summary(records)["unidades"] == 2
+    ordered = final_records(records)
+    assert ordered.loc[0, "UNIDADES"] == "123_UNIDAD_PRUEBA"
+
+    zip_bytes = generate_pdf_zip_by_unit(records, generated_on=date(2026, 8, 14))
+    with zipfile.ZipFile(BytesIO(zip_bytes)) as archive:
+        names = archive.namelist()
+        unit_pdf = archive.read("CERTIFICADOS_123_UNIDAD_PRUEBA_14-08-2026.pdf")
+
+    assert len(names) == 2
+    assert "CERTIFICADOS_123_UNIDAD_PRUEBA_14-08-2026.pdf" in names
+    pdf_text = "\n".join(page.extract_text() or "" for page in PdfReader(BytesIO(unit_pdf)).pages)
+    assert "Ana" in pdf_text
+    assert "Luis" in pdf_text
 
 
 def test_invalid_excel_file_raises_clear_error():

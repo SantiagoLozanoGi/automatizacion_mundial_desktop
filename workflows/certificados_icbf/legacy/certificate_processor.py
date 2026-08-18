@@ -90,6 +90,13 @@ def _key(value: object) -> str:
     )
 
 
+def normalize_unit_key(value: object) -> str:
+    """Build the comparison key used for unit identity and grouping only."""
+    if is_missing(value):
+        return "NA"
+    return _key(re.sub(r"[-_]", " ", _text(value)))
+
+
 def _text(value: object) -> str:
     """Convert a value into a safe single-line string.
 
@@ -397,7 +404,12 @@ def final_records(
             "o documentos duplicados."
         )
     active = validation["active"].copy()
-    active["_ORDEN_UNIDAD"] = active["UNIDADES"].map(_key)
+    active["_ORDEN_UNIDAD"] = active["UNIDADES"].map(normalize_unit_key)
+    representative_units = (
+        active.drop_duplicates("_ORDEN_UNIDAD", keep="first")
+        .set_index("_ORDEN_UNIDAD")["UNIDADES"]
+    )
+    active["UNIDADES"] = active["_ORDEN_UNIDAD"].map(representative_units)
     active["_ORDEN_NOMBRE"] = (
         active["PRIMER APELLIDO"].map(_key) + " " + active["PRIMER NOMBRE"].map(_key)
     )
@@ -473,7 +485,7 @@ def _paginate(frame: pd.DataFrame, rows_per_page: int = DEFAULT_ROWS_PER_PAGE) -
     pages: list[list[dict[str, object]]] = []
     current: list[dict[str, object]] = []
     groups: list[list[dict[str, object]]] = []
-    for _, group in frame.groupby("UNIDADES", sort=False, dropna=False):
+    for _, group in frame.groupby(frame["UNIDADES"].map(normalize_unit_key), sort=False, dropna=False):
         groups.append(group.to_dict("records"))
 
     for group in groups:
@@ -549,7 +561,10 @@ def _unit_text_layout(value: object, max_width: float, font: str, normal_size: f
 
 def _paginate_by_height(frame: pd.DataFrame, row_heights: list[float], available_height: float) -> list[list[int]]:
     """Paginate real row heights while retaining unit groups whenever they fit."""
-    groups = [list(group.index) for _, group in frame.groupby("UNIDADES", sort=False, dropna=False)]
+    groups = [
+        list(group.index)
+        for _, group in frame.groupby(frame["UNIDADES"].map(normalize_unit_key), sort=False, dropna=False)
+    ]
     pages: list[list[int]] = []
     current: list[int] = []
     used_height = 0.0
@@ -727,8 +742,9 @@ def generate_pdf_zip_by_unit(
         stamp = (generated_on or date.today()).strftime("%d-%m-%Y")
         buffer = BytesIO()
         with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
-            for unit, group in frame.groupby("UNIDADES", sort=False, dropna=False):
-                unit_label = "NA" if is_missing(unit) else _sanitize_filename(unit)
+            for _, group in frame.groupby(frame["UNIDADES"].map(normalize_unit_key), sort=False, dropna=False):
+                representative_unit = group["UNIDADES"].iloc[0]
+                unit_label = "NA" if is_missing(representative_unit) else _sanitize_filename(representative_unit)
                 if not unit_label:
                     unit_label = "unidad"
                 unit_frame = group.reset_index(drop=True)
@@ -773,7 +789,7 @@ def build_email_text(records: pd.DataFrame) -> str:
 def validation_summary(records: pd.DataFrame) -> dict[str, int | bool]:
     """Return a compact summary of validation metrics for the UI dashboard."""
     validation = validate_records(records)
-    units = validation["active"]["UNIDADES"].map(lambda value: "NA" if is_missing(value) else value)
+    units = validation["active"]["UNIDADES"].map(normalize_unit_key)
     problem_indexes = set(validation["invalid_document"].index)
     problem_indexes.update(validation["duplicates"].index)
     problem_indexes.update(validation["missing_report"].index)

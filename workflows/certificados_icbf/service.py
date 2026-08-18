@@ -15,6 +15,7 @@ from workflows.certificados_icbf.legacy.certificate_processor import (
     final_records,
     generate_pdf,
     generate_pdf_zip_by_unit,
+    normalize_unit_key,
     is_missing,
     is_standard_document,
     normalize_edited_records,
@@ -189,7 +190,7 @@ class ReviewSession:
             rows[index] = {"status": status, "anomalies": anomalies, "categories": categories}
 
         active = self._records.loc[sorted(included_indexes)].copy()
-        units = active["UNIDADES"].map(lambda value: "NA" if is_missing(value) else value)
+        units = active["UNIDADES"].map(normalize_unit_key)
         selected = len(included_indexes)
         summary = {
             "registros_activos": selected,
