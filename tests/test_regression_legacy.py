@@ -10,6 +10,7 @@ from pypdf import PdfReader
 
 from workflows.certificados_icbf.legacy.certificate_processor import (
     BODY_FONT_SIZE,
+    BODY_MIN_FONT_SIZE,
     InputFormatError,
     _paginate,
     _paginate_by_height,
@@ -38,7 +39,8 @@ def test_height_pagination_starts_a_new_page_only_when_next_row_does_not_fit() -
     pages = _paginate_by_height(frame, [10.0, 15.0, 10.0], available_height=25.0)
 
     assert pages == [[0, 1], [2]]
-    assert BODY_FONT_SIZE == 8.5
+    assert BODY_FONT_SIZE == 6.8
+    assert BODY_MIN_FONT_SIZE == 6.2
 
 
 def test_format_date_converts_excel_serials() -> None:

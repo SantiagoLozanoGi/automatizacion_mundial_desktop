@@ -69,7 +69,12 @@ REQUIRED_FIELDS = [
 ]
 MISSING_TOKENS = {"", "NA", "N/A", "N.A.", "NONE", "NAN", "NULL"}
 DEFAULT_ROWS_PER_PAGE = 25
-BODY_FONT_SIZE = 8.5
+BODY_FONT_SIZE = 6.8
+BODY_MIN_FONT_SIZE = 6.2
+UNIT_MIN_FONT_SIZE = 5.8
+UNIT_LINE_HEIGHT_FACTOR = 1.1
+ROW_VERTICAL_PADDING = 2.5
+TABLE_WIDTHS = [22, 62, 62, 62, 62, 72, 68, 135]
 
 
 class InputFormatError(ValueError):
@@ -498,12 +503,19 @@ def _paginate(frame: pd.DataFrame, rows_per_page: int = DEFAULT_ROWS_PER_PAGE) -
     return pages or [[]]
 
 
-def _fit_text(pdf: canvas.Canvas, text: object, max_width: float, font: str, size: float) -> float:
+def _fit_text(
+    pdf: canvas.Canvas,
+    text: object,
+    max_width: float,
+    font: str,
+    size: float,
+    minimum_size: float = 5.5,
+) -> float:
     """Choose the largest font size that fits text inside the available width."""
     value = _text(text)
     candidate = size
-    while candidate > 5.5 and pdfmetrics.stringWidth(value, font, candidate) > max_width:
-        candidate -= 0.25
+    while candidate > minimum_size and pdfmetrics.stringWidth(value, font, candidate) > max_width:
+        candidate = max(minimum_size, candidate - 0.25)
     return candidate
 
 
@@ -535,15 +547,27 @@ def _wrap_text(text: object, max_width: float, font: str, size: float) -> list[s
     return lines
 
 
-def _unit_text_layout(value: object, max_width: float, font: str, normal_size: float) -> tuple[float, list[str]]:
-    """Return the largest readable unit font and its complete wrapped lines."""
+def _unit_text_layout(
+    value: object,
+    max_width: float,
+    font: str,
+    normal_size: float,
+    minimum_size: float = UNIT_MIN_FONT_SIZE,
+) -> tuple[float, list[str]]:
+    """Prefer one readable unit line, wrapping to two lines only when needed."""
+    text = _text(value)
     size = normal_size
-    while size > 5.5:
-        lines = _wrap_text(value, max_width, font, size)
-        if len(lines) <= 3:
-            return size, lines
+    while size >= minimum_size:
+        if pdfmetrics.stringWidth(text, font, size) <= max_width:
+            return size, [text]
         size -= 0.25
-    return 5.5, _wrap_text(value, max_width, font, 5.5)
+
+    size = normal_size
+    lines = _wrap_text(text, max_width, font, size)
+    while len(lines) > 2 and size > minimum_size:
+        size = max(minimum_size, size - 0.25)
+        lines = _wrap_text(text, max_width, font, size)
+    return size, lines
 
 
 def _paginate_by_height(frame: pd.DataFrame, row_heights: list[float], available_height: float) -> list[list[int]]:
@@ -599,19 +623,19 @@ def _build_pdf_bytes(
                 logo_height = source_height * scale
 
         top = page_height - (logo_height + 45 if logo else 32)
-        header_height = 34
+        header_height = 30
         footer_margin = 20
-        widths = [22, 65, 68, 65, 68, 74, 74, 109]
+        widths = TABLE_WIDTHS
         headers = OUTPUT_COLUMNS
         available_height = top - footer_margin - header_height
-        normal_row_height = min(19.0, max(7.0, available_height / max(rows_per_page, 1)))
+        normal_row_height = min(18.0, max(9.5, available_height / max(rows_per_page, 1)))
         normal_font_size = BODY_FONT_SIZE
         unit_width = widths[headers.index("UNIDADES")] - 5
         layouts: list[tuple[float, list[str]]] = []
         row_heights: list[float] = []
         for value in frame["UNIDADES"]:
             unit_size, unit_lines = _unit_text_layout(value, unit_width, regular_font, normal_font_size)
-            wrapped_height = len(unit_lines) * unit_size * 1.15 + 4
+            wrapped_height = len(unit_lines) * unit_size * UNIT_LINE_HEIGHT_FACTOR + ROW_VERTICAL_PADDING
             row_heights.append(normal_row_height if len(unit_lines) == 1 else max(normal_row_height, wrapped_height))
             layouts.append((unit_size, unit_lines))
         pages = _paginate_by_height(frame, row_heights, available_height)
@@ -660,7 +684,7 @@ def _build_pdf_bytes(
                     if column == "UNIDADES":
                         unit_size, unit_lines = layouts[index]
                         pdf.setFont(regular_font, unit_size)
-                        line_height = unit_size * 1.15
+                        line_height = unit_size * UNIT_LINE_HEIGHT_FACTOR
                         text_y = y - row_height / 2 + (len(unit_lines) - 1) * line_height / 2 - unit_size * 0.25
                         for line in unit_lines:
                             pdf.drawCentredString(x + width / 2, text_y, line)
@@ -673,6 +697,7 @@ def _build_pdf_bytes(
                         width - 5,
                         regular_font,
                         normal_font_size,
+                        BODY_MIN_FONT_SIZE,
                     )
                     pdf.setFont(regular_font, font_size)
                     text_y = y - row_height / 2 - 2
