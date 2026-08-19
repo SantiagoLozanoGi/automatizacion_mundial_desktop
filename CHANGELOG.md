@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.6.1] - 2026-08-19
+
+### Cambiado
+
+- El PDF general aprovecha el espacio disponible sin forzar saltos de página por cambio de unidad.
+- Distintas unidades pueden compartir una misma página y la tipografía corporal mantiene un tamaño uniforme.
+
+### Corregido
+
+- Evitadas páginas con pocos registros por agrupación de unidades y cambios bruscos de fuente entre filas de distinta altura.
+- Las unidades largas continúan usando wrapping sin aumentar el tamaño del resto de columnas.
+
 ## [0.6.0] - 2026-08-19
 
 ### Añadido

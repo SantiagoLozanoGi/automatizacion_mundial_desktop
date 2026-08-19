@@ -9,8 +9,10 @@ import pandas as pd
 from pypdf import PdfReader
 
 from workflows.certificados_icbf.legacy.certificate_processor import (
+    BODY_FONT_SIZE,
     InputFormatError,
     _paginate,
+    _paginate_by_height,
     final_records,
     format_date,
     generate_pdf,
@@ -20,6 +22,23 @@ from workflows.certificados_icbf.legacy.certificate_processor import (
     validate_records,
     validation_summary,
 )
+
+
+def test_height_pagination_mixes_units_and_preserves_order() -> None:
+    frame = pd.DataFrame(
+        {"UNIDADES": ["A"] * 21 + ["B"] * 4, "ORDEN": list(range(25))}
+    )
+    pages = _paginate_by_height(frame, [10.0] * len(frame), available_height=250.0)
+
+    assert pages == [list(range(25))]
+
+
+def test_height_pagination_starts_a_new_page_only_when_next_row_does_not_fit() -> None:
+    frame = pd.DataFrame({"UNIDADES": ["A", "B", "B"], "ORDEN": [0, 1, 2]})
+    pages = _paginate_by_height(frame, [10.0, 15.0, 10.0], available_height=25.0)
+
+    assert pages == [[0, 1], [2]]
+    assert BODY_FONT_SIZE == 8.5
 
 
 def test_format_date_converts_excel_serials() -> None:
@@ -162,18 +181,17 @@ def test_invalid_document_blocks_pdf():
     assert len(validation["invalid_document"]) == 2
 
 
-def test_city_group_not_split_when_it_fits():
+def test_row_pagination_allows_units_to_share_a_page():
     frame = pd.DataFrame([
         {"N°": i + 1, "UNIDADES": "A" if i < 20 else "B"}
         for i in range(30)
     ])
     pages = _paginate(frame)
-    assert len(pages) == 2
-    assert {row["UNIDADES"] for row in pages[0]} == {"A"}
-    assert {row["UNIDADES"] for row in pages[1]} == {"B"}
+    assert [len(page) for page in pages] == [25, 5]
+    assert {row["UNIDADES"] for row in pages[0]} == {"A", "B"}
 
 
-def test_pagination_keeps_next_unit_whole_at_seventy_capacity():
+def test_row_pagination_uses_remaining_capacity_after_a_unit_change():
     frame = pd.DataFrame([
         {"N°": index + 1, "UNIDADES": "A" if index < 55 else "B"}
         for index in range(75)
@@ -181,9 +199,8 @@ def test_pagination_keeps_next_unit_whole_at_seventy_capacity():
 
     pages = _paginate(frame, rows_per_page=70)
 
-    assert [len(page) for page in pages] == [55, 20]
-    assert {row["UNIDADES"] for row in pages[0]} == {"A"}
-    assert {row["UNIDADES"] for row in pages[1]} == {"B"}
+    assert [len(page) for page in pages] == [70, 5]
+    assert {row["UNIDADES"] for row in pages[0]} == {"A", "B"}
 
 
 def test_pagination_splits_only_unit_larger_than_capacity():

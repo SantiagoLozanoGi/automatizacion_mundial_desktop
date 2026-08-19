@@ -123,16 +123,15 @@ def test_invalid_document_blocks_pdf():
     assert len(validation["invalid_document"]) == 2
 
 
-def test_city_group_not_split_when_it_fits():
+def test_row_pagination_allows_units_to_share_a_page():
     """Validate pagination keeps unit groups together when possible."""
     frame = pd.DataFrame([
         {"N°": i + 1, "UNIDADES": "A" if i < 20 else "B"}
         for i in range(30)
     ])
     pages = _paginate(frame)
-    assert len(pages) == 2
-    assert {row["UNIDADES"] for row in pages[0]} == {"A"}
-    assert {row["UNIDADES"] for row in pages[1]} == {"B"}
+    assert [len(page) for page in pages] == [25, 5]
+    assert {row["UNIDADES"] for row in pages[0]} == {"A", "B"}
 
 
 def test_generate_pdf_with_seventy_rows_same_unit():

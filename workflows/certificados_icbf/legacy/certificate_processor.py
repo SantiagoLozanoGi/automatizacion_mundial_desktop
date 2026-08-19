@@ -69,6 +69,7 @@ REQUIRED_FIELDS = [
 ]
 MISSING_TOKENS = {"", "NA", "N/A", "N.A.", "NONE", "NAN", "NULL"}
 DEFAULT_ROWS_PER_PAGE = 25
+BODY_FONT_SIZE = 8.5
 
 
 class InputFormatError(ValueError):
@@ -484,35 +485,14 @@ def _register_font() -> tuple[str, str]:
 
 
 def _paginate(frame: pd.DataFrame, rows_per_page: int = DEFAULT_ROWS_PER_PAGE) -> list[list[dict[str, object]]]:
-    """Split records into pages while preserving UNIDADES groups.
-
-    Ensures that unit groups are not split across pages unless they exceed the page
-    capacity, in which case the group is split cleanly.
-    """
+    """Split records sequentially, without reserving pages for unit groups."""
     pages: list[list[dict[str, object]]] = []
     current: list[dict[str, object]] = []
-    groups: list[list[dict[str, object]]] = []
-    for _, group in frame.groupby(frame["UNIDADES"].map(normalize_unit_key), sort=False, dropna=False):
-        groups.append(group.to_dict("records"))
-
-    for group in groups:
-        if len(group) <= rows_per_page:
-            remaining = rows_per_page - len(current)
-            if current and len(group) > remaining:
-                pages.append(current)
-                current = []
-            current.extend(group)
-            continue
-
-        if current:
+    for record in frame.to_dict("records"):
+        if len(current) == rows_per_page:
             pages.append(current)
             current = []
-        for start in range(0, len(group), rows_per_page):
-            chunk = group[start:start + rows_per_page]
-            if len(chunk) == rows_per_page:
-                pages.append(chunk)
-            else:
-                current = chunk
+        current.append(record)
     if current:
         pages.append(current)
     return pages or [[]]
@@ -567,11 +547,7 @@ def _unit_text_layout(value: object, max_width: float, font: str, normal_size: f
 
 
 def _paginate_by_height(frame: pd.DataFrame, row_heights: list[float], available_height: float) -> list[list[int]]:
-    """Paginate real row heights while retaining unit groups whenever they fit."""
-    groups = [
-        list(group.index)
-        for _, group in frame.groupby(frame["UNIDADES"].map(normalize_unit_key), sort=False, dropna=False)
-    ]
+    """Paginate ordered rows by physical height without splitting a row."""
     pages: list[list[int]] = []
     current: list[int] = []
     used_height = 0.0
@@ -582,16 +558,12 @@ def _paginate_by_height(frame: pd.DataFrame, row_heights: list[float], available
             pages.append(current)
         current, used_height = [], 0.0
 
-    for group in groups:
-        group_height = sum(row_heights[index] for index in group)
-        if current and used_height + group_height > available_height + 0.01:
+    for position, index in enumerate(frame.index):
+        height = row_heights[position]
+        if current and used_height + height > available_height + 0.01:
             add_page()
-        for index in group:
-            height = row_heights[index]
-            if current and used_height + height > available_height + 0.01:
-                add_page()
-            current.append(index)
-            used_height += height
+        current.append(index)
+        used_height += height
     add_page()
     return pages or [[]]
 
@@ -633,7 +605,7 @@ def _build_pdf_bytes(
         headers = OUTPUT_COLUMNS
         available_height = top - footer_margin - header_height
         normal_row_height = min(19.0, max(7.0, available_height / max(rows_per_page, 1)))
-        normal_font_size = min(9.5, max(6.0, normal_row_height * 0.55))
+        normal_font_size = BODY_FONT_SIZE
         unit_width = widths[headers.index("UNIDADES")] - 5
         layouts: list[tuple[float, list[str]]] = []
         row_heights: list[float] = []
@@ -700,7 +672,7 @@ def _build_pdf_bytes(
                         value,
                         width - 5,
                         regular_font,
-                        min(9.5, max(6.0, row_height * 0.55)),
+                        normal_font_size,
                     )
                     pdf.setFont(regular_font, font_size)
                     text_y = y - row_height / 2 - 2
