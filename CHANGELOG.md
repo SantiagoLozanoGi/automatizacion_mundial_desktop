@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.6.2] - 2026-08-19
+
+### Cambiado
+
+- Tabla PDF más compacta, con anchos redistribuidos para dar más espacio a `UNIDADES`.
+- `UNIDADES` ahora reduce moderadamente su fuente antes de usar wrapping, limitado normalmente a dos líneas.
+
+### Corregido
+
+- Reducido el espacio vertical desperdiciado por unidades que podían mostrarse en una sola línea.
+
 ## [0.6.1] - 2026-08-19
 
 ### Cambiado

@@ -5,9 +5,12 @@ import zipfile
 
 import pandas as pd
 from pypdf import PdfReader
+from reportlab.pdfbase import pdfmetrics
 
 from workflows.certificados_icbf.legacy.certificate_processor import (
+    BODY_FONT_SIZE,
     InputFormatError,
+    UNIT_MIN_FONT_SIZE,
     _register_font,
     _unit_text_layout,
     _paginate,
@@ -157,10 +160,10 @@ def test_long_unit_names_wrap_in_general_pdf_and_unit_zip():
         "CENTRO DE DESARROLLO INFANTIL UNIDAD DE PRUEBA EXTENSA",
     ]
     regular_font, _ = _register_font()
-    expected_lines = [1, 2, 3]
+    expected_lines = [1, 1, 2]
     for unit, line_count in zip(units, expected_lines):
-        font_size, lines = _unit_text_layout(unit, 104, regular_font, 6)
-        assert font_size >= 5.5
+        font_size, lines = _unit_text_layout(unit, 104, regular_font, BODY_FONT_SIZE)
+        assert font_size >= UNIT_MIN_FONT_SIZE
         assert len(lines) == line_count
         assert " ".join(lines) == unit
 
@@ -188,6 +191,29 @@ def test_long_unit_names_wrap_in_general_pdf_and_unit_zip():
     for unit in units:
         for word in unit.split():
             assert word in zip_text
+
+
+def test_unit_layout_reduces_before_wrapping_and_respects_minimum_font() -> None:
+    regular_font, _ = _register_font()
+    value = "FUNDADORES RIOBLANCO"
+    base_width = pdfmetrics.stringWidth(value, regular_font, BODY_FONT_SIZE)
+    minimum_width = pdfmetrics.stringWidth(value, regular_font, UNIT_MIN_FONT_SIZE)
+    width = (base_width + minimum_width) / 2
+
+    size, lines = _unit_text_layout(value, width, regular_font, BODY_FONT_SIZE)
+
+    assert len(lines) == 1
+    assert UNIT_MIN_FONT_SIZE <= size < BODY_FONT_SIZE
+
+
+def test_very_long_unit_uses_at_most_two_lines_at_readable_size() -> None:
+    regular_font, _ = _register_font()
+    value = "CENTRO DE DESARROLLO INFANTIL PARA LA PRIMERA INFANCIA RIOBLANCO"
+
+    size, lines = _unit_text_layout(value, 130, regular_font, BODY_FONT_SIZE)
+
+    assert len(lines) <= 2
+    assert size >= UNIT_MIN_FONT_SIZE
 
 
 def test_invalid_excel_file_raises_clear_error():
