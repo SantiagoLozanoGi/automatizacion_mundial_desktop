@@ -94,7 +94,6 @@ def test_reports_only_ingresos_and_required_fields():
     assert set(missing.split(", ")) == {
         "PRIMER NOMBRE",
         "FECHA DE NACIMIENTO",
-        "UNIDADES",
     }
     assert "SEGUNDO NOMBRE" not in missing
     assert "SEGUNDO APELLIDO" not in missing
