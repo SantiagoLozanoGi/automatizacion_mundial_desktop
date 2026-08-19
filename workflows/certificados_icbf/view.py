@@ -215,7 +215,7 @@ class CertificadosIcbfView(QtWidgets.QWidget):
         filter_row.addStretch()
         review_layout.addLayout(filter_row)
         edit_help = QtWidgets.QLabel(
-            "Campos editables: documento, primer apellido y segundo apellido. "
+            "Campos editables: documento, primer apellido, segundo apellido y unidades. "
             "Haz doble clic sobre una celda para corregirla."
         )
         edit_help.setWordWrap(True)
@@ -436,8 +436,10 @@ class CertificadosIcbfView(QtWidgets.QWidget):
             if review["ready"]
             else "1. Cargar archivo  ✓    2. Revisar información  ←    3. Generar archivos"
         )
-        self.pdf_button.setEnabled(bool(review["ready"]) and self._output_thread is None)
-        self.zip_button.setEnabled(bool(review["ready"]) and self._output_thread is None)
+        self.pdf_button.setEnabled(bool(review["pdf_ready"]) and self._output_thread is None)
+        self.zip_button.setEnabled(bool(review["zip_ready"]) and self._output_thread is None)
+        if review["pdf_ready"] and not review["zip_ready"]:
+            self.generation_status.setText(review["zip_blocking_reason"])
         self.duplicates_button.setEnabled(bool(summary["reporte_duplicados"]))
         self.missing_button.setEnabled(bool(summary["reporte_faltantes"]))
         if self._email_is_current and self.records is not None:
@@ -527,7 +529,7 @@ class CertificadosIcbfView(QtWidgets.QWidget):
     def _start_generation(self, output_type: str) -> None:
         if self.is_busy:
             return
-        if self.table_model is None or not self.table_model.review["ready"]:
+        if self.table_model is None or not self.table_model.review[f"{output_type}_ready"]:
             logger.warning("Intento de generacion sin registros listos tipo=%s", output_type)
             QtWidgets.QMessageBox.warning(
                 self, "Generación bloqueada", "Los registros seleccionados todavía requieren revisión."
@@ -574,8 +576,8 @@ class CertificadosIcbfView(QtWidgets.QWidget):
             self._review_changed(self.table_model.review)
 
     def _set_generation_busy(self, busy: bool, output_type: str = "") -> None:
-        self.pdf_button.setEnabled(not busy and bool(self.table_model and self.table_model.review["ready"]))
-        self.zip_button.setEnabled(not busy and bool(self.table_model and self.table_model.review["ready"]))
+        self.pdf_button.setEnabled(not busy and bool(self.table_model and self.table_model.review["pdf_ready"]))
+        self.zip_button.setEnabled(not busy and bool(self.table_model and self.table_model.review["zip_ready"]))
         self.duplicates_button.setEnabled(
             not busy and bool(self.table_model and self.table_model.review["summary"]["reporte_duplicados"])
         )

@@ -9,6 +9,22 @@ from workflows.certificados_icbf.models import RecordsFilterProxyModel, RecordsT
 from workflows.certificados_icbf.service import CertificadosIcbfService
 
 
+def test_units_edit_recalculates_zip_readiness_without_mutating_source() -> None:
+    records = editable_records()
+    records.loc[0, "DOCUMENTO"] = "0000000789"
+    records.loc[0, "PRIMER APELLIDO"] = "Gómez"
+    records.loc[0, "UNIDADES"] = ""
+    original = records.copy(deep=True)
+    model = RecordsTableModel(records)
+
+    assert model.review["pdf_ready"] is True
+    assert model.review["zip_ready"] is False
+    assert edit(model, 0, "UNIDADES", "  Bogotá  ")
+    assert model.records.loc[0, "UNIDADES"] == "Bogotá"
+    assert model.review["zip_ready"] is True
+    assert records.equals(original)
+
+
 def build_source() -> BytesIO:
     frame = pd.DataFrame(
         [
@@ -154,9 +170,9 @@ def edit(model: RecordsTableModel, row: int, column: str, value: str) -> bool:
 def test_only_authorized_business_fields_are_editable() -> None:
     model = RecordsTableModel(editable_records())
 
-    for column in ("DOCUMENTO", "PRIMER APELLIDO", "SEGUNDO APELLIDO"):
+    for column in ("DOCUMENTO", "PRIMER APELLIDO", "SEGUNDO APELLIDO", "UNIDADES"):
         assert model.flags(model.index(0, model._columns.index(column))) & QtCore.Qt.ItemIsEditable
-    for column in ("PRIMER NOMBRE", "SEGUNDO NOMBRE", "FECHA DE NACIMIENTO", "UNIDADES", "_FILA_ORIGEN"):
+    for column in ("PRIMER NOMBRE", "SEGUNDO NOMBRE", "FECHA DE NACIMIENTO", "_FILA_ORIGEN"):
         assert not model.flags(model.index(0, model._columns.index(column))) & QtCore.Qt.ItemIsEditable
         assert not edit(model, 0, column, "cambio no autorizado")
 

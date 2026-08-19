@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.6.0] - 2026-08-19
+
+### Añadido
+
+- Edición manual de `UNIDADES` y disponibilidad diferenciada de PDF general y ZIP por unidad.
+- Soporte para archivos de entrada sin columna `UNIDADES`.
+- Reconocimiento controlado de `INGRES0` y `1NGRESO` como novedades de ingreso.
+
+### Cambiado
+
+- `UNIDADES` deja de ser obligatoria para el PDF general y es requisito exclusivo del ZIP por unidad.
+- Validación de `TIPO DE NOVEDAD` centralizada mediante normalización explícita.
+
+### Corregido
+
+- PDF compatible con registros sin unidad y protección del servicio ante ZIP con unidades faltantes.
+
 Todos los cambios relevantes de la aplicación se documentarán en este archivo.
 
 ## [0.5.0] - 2026-08-14

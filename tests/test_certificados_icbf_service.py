@@ -14,6 +14,59 @@ from app.file_io import save_bytes_to_file
 from reportlab.pdfgen import canvas
 
 
+def test_missing_units_only_blocks_zip_and_excluded_rows_do_not_block_it() -> None:
+    workflow_service = CertificadosIcbfService()
+    records, _ = workflow_service.read_and_clean_excel(build_source())
+    records.loc[0, "UNIDADES"] = ""
+
+    review = workflow_service.review_records(records)
+    assert review["pdf_ready"] is True
+    assert review["zip_ready"] is False
+    assert workflow_service.generate_pdf(records).startswith(b"%PDF")
+    with pytest.raises(ValueError, match="UNIDADES"):
+        workflow_service.generate_pdf_zip_by_unit(records)
+
+    assert workflow_service.review_records(workflow_service.set_included(records, 0, False))["zip_ready"] is True
+
+
+def test_excel_without_units_keeps_internal_column_and_generates_pdf() -> None:
+    source = build_source()
+    frame = pd.read_excel(source).drop(columns=["UNIDADES"])
+    content = BytesIO()
+    frame.to_excel(content, index=False)
+    content.seek(0)
+    workflow_service = CertificadosIcbfService()
+    records, _ = workflow_service.read_and_clean_excel(content)
+    assert records["UNIDADES"].tolist() == ["", ""]
+    assert workflow_service.generate_pdf(records).startswith(b"%PDF")
+    with pytest.raises(ValueError, match="UNIDADES"):
+        workflow_service.generate_pdf_zip_by_unit(records)
+
+
+@pytest.mark.parametrize("novelty", ["IN", "INGRESO", "ingreso", " INGRESO ", "INGRES0", "1NGRESO"])
+def test_service_accepts_known_ingreso_variants(novelty: str) -> None:
+    source = build_source()
+    frame = pd.read_excel(source)
+    frame.loc[0, "Tipo de Novedad"] = novelty
+    content = BytesIO()
+    frame.to_excel(content, index=False)
+    content.seek(0)
+    _, stats = CertificadosIcbfService().read_and_clean_excel(content)
+    assert stats["ingresos"] == 2
+
+
+@pytest.mark.parametrize("novelty", ["RETIRO", "EGRESO", "OTRO", "CAMBIO", "INGRES", "XINGRESO"])
+def test_service_rejects_unknown_ingreso_variants(novelty: str) -> None:
+    source = build_source()
+    frame = pd.read_excel(source)
+    frame.loc[0, "Tipo de Novedad"] = novelty
+    content = BytesIO()
+    frame.to_excel(content, index=False)
+    content.seek(0)
+    _, stats = CertificadosIcbfService().read_and_clean_excel(content)
+    assert stats["ingresos"] == 1
+
+
 def build_source() -> BytesIO:
     frame = pd.DataFrame(
         [
@@ -117,13 +170,13 @@ def test_service_reports_invalid_and_missing_fields() -> None:
     service = CertificadosIcbfService()
     records, _ = service.read_and_clean_excel(build_source())
     records.loc[0, "DOCUMENTO"] = "ABC"
-    records.loc[0, "UNIDADES"] = ""
+    records.loc[0, "PRIMER NOMBRE"] = ""
 
     row_review = service.review_records(records)["rows"][0]
 
     assert row_review["categories"] == {"included", "nonstandard", "missing"}
     assert any("Documento no estándar" in item for item in row_review["anomalies"])
-    assert any("UNIDADES" in item for item in row_review["anomalies"])
+    assert any("PRIMER NOMBRE" in item for item in row_review["anomalies"])
 
 
 def test_review_session_reuses_validation_and_revalidates_business_edits(monkeypatch) -> None:
@@ -159,7 +212,7 @@ def test_service_preserves_anomaly_reports_independently_of_selection() -> None:
     workflow_service = CertificadosIcbfService()
     records, _ = workflow_service.read_and_clean_excel(build_source())
     records.loc[1, "DOCUMENTO"] = records.loc[0, "DOCUMENTO"]
-    records.loc[0, "UNIDADES"] = ""
+    records.loc[0, "PRIMER NOMBRE"] = ""
 
     duplicates = workflow_service.generate_duplicates_report(records)
     missing = workflow_service.generate_missing_fields_report(records)
@@ -187,7 +240,7 @@ def test_service_preserves_anomaly_reports_independently_of_selection() -> None:
 def test_missing_report_keeps_excluded_anomaly_but_ignores_valid_excluded_row() -> None:
     workflow_service = CertificadosIcbfService()
     records, _ = workflow_service.read_and_clean_excel(build_source())
-    records.loc[1, "UNIDADES"] = ""
+    records.loc[1, "PRIMER NOMBRE"] = ""
     session = workflow_service.create_review_session(records)
 
     included_report = workflow_service.generate_missing_fields_report(session)
@@ -237,7 +290,7 @@ def test_review_maps_missing_fields_to_original_source_row() -> None:
     review = workflow_service.review_records(records)
 
     assert "missing" not in review["rows"][0]["categories"]
-    assert "missing" in review["rows"][1]["categories"]
+    assert "missing_unit" in review["rows"][1]["categories"]
     updated = workflow_service.set_included(records, 1, False)
     assert workflow_service.output_availability(updated)["ready"] is True
 

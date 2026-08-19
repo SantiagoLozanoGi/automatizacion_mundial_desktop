@@ -66,7 +66,6 @@ REQUIRED_FIELDS = [
     "PRIMER NOMBRE",
     "DOCUMENTO",
     "FECHA DE NACIMIENTO",
-    "UNIDADES",
 ]
 MISSING_TOKENS = {"", "NA", "N/A", "N.A.", "NONE", "NAN", "NULL"}
 DEFAULT_ROWS_PER_PAGE = 25
@@ -95,6 +94,12 @@ def normalize_unit_key(value: object) -> str:
     if is_missing(value):
         return "NA"
     return _key(re.sub(r"[-_]", " ", _text(value)))
+
+
+def normalize_novelty(value: object) -> str:
+    """Return the supported canonical novelty value, or the normalized input."""
+    novelty = _key(value)
+    return "INGRESO" if novelty in {"IN", "INGRESO", "INGRES0", "1NGRESO"} else novelty
 
 
 def _text(value: object) -> str:
@@ -205,7 +210,6 @@ def _resolve_columns(columns: list[object]) -> dict[str, object]:
         "SEGUNDO APELLIDO",
         "DOCUMENTO",
         "FECHA DE NACIMIENTO",
-        "UNIDADES",
     }
     missing = sorted(required_source - resolved.keys())
     if missing:
@@ -254,13 +258,16 @@ def read_and_clean_excel(file_or_buffer: object) -> tuple[pd.DataFrame, dict[str
 
     total_received = len(data)
     if "TIPO DE NOVEDAD" in resolved:
-        novelty = data[resolved["TIPO DE NOVEDAD"]].map(_key)
-        keep = novelty.isin({"IN", "INGRESO"})
+        novelty = data[resolved["TIPO DE NOVEDAD"]].map(normalize_novelty)
+        keep = novelty.eq("INGRESO")
         data = data.loc[keep].copy()
 
     cleaned = pd.DataFrame(index=data.index)
     cleaned["INCLUIR"] = True
     for target in EDITABLE_COLUMNS[1:-1]:
+        if target == "UNIDADES" and target not in resolved:
+            cleaned[target] = ""
+            continue
         source = resolved[target]
         if target == "DOCUMENTO":
             cleaned[target] = data[source].map(_document_from_excel)

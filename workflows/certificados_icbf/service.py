@@ -25,11 +25,12 @@ from workflows.certificados_icbf.legacy.certificate_processor import (
 )
 
 
-EDITABLE_FIELDS = frozenset({"DOCUMENTO", "PRIMER APELLIDO", "SEGUNDO APELLIDO"})
+EDITABLE_FIELDS = frozenset({"DOCUMENTO", "PRIMER APELLIDO", "SEGUNDO APELLIDO", "UNIDADES"})
 _LOG_FIELD_NAMES = {
     "DOCUMENTO": "document",
     "PRIMER APELLIDO": "first_surname",
     "SEGUNDO APELLIDO": "second_surname",
+    "UNIDADES": "units",
 }
 logger = get_logger("certificados_icbf")
 
@@ -154,6 +155,9 @@ class ReviewSession:
         }
         invalid_indexes = (self._invalid_indexes - authorized_indexes) & included_indexes
         missing_indexes = set(self._missing_by_index) & included_indexes
+        units_missing_indexes = {
+            index for index in included_indexes if is_missing(self._records.at[index, "UNIDADES"])
+        }
         problem_indexes = duplicate_indexes | invalid_indexes | missing_indexes
 
         rows: dict[int, dict[str, Any]] = {}
@@ -176,6 +180,9 @@ class ReviewSession:
                     f"Campos obligatorios faltantes: {self._missing_by_index[index]}"
                 )
                 categories.add("missing")
+            if index in units_missing_indexes:
+                anomalies.append("Falta UNIDADES para generar el ZIP por unidad.")
+                categories.add("missing_unit")
             if not included:
                 status = "No incluido"
                 categories.add("excluded")
@@ -201,6 +208,7 @@ class ReviewSession:
             "documentos_excepcion_autorizada": len(authorized_indexes & included_indexes),
             "filas_duplicadas": len(duplicate_indexes),
             "campos_informativos": len(missing_indexes),
+            "unidades_faltantes": len(units_missing_indexes),
             "unidades": units.nunique(dropna=False),
             "blocking": bool(problem_indexes),
             "total_procesado": len(self._records),
@@ -208,11 +216,21 @@ class ReviewSession:
             "reporte_duplicados": len(self._duplicates_report),
             "reporte_faltantes": len(self._missing_report),
         }
-        ready = selected > 0 and not summary["blocking"]
+        pdf_ready = selected > 0 and not summary["blocking"]
+        zip_ready = pdf_ready and not units_missing_indexes
+        ready = pdf_ready
         return {
             "rows": rows,
             "summary": summary,
-            "ready": ready,
+            "ready": pdf_ready,
+            "pdf_ready": pdf_ready,
+            "zip_ready": zip_ready,
+            "units_missing": len(units_missing_indexes),
+            "zip_blocking_reason": "" if zip_ready else (
+                f"Faltan unidades en {len(units_missing_indexes)} registros incluidos. "
+                "Completa la columna UNIDADES para generar el ZIP."
+                if pdf_ready else ""
+            ),
             "status": "Listo para generación" if ready else "Requiere revisión",
             "blocking_reason": "" if ready else CertificadosIcbfService._blocking_reason(summary, selected),
         }
@@ -245,7 +263,7 @@ class CertificadosIcbfService:
 
     def generate_pdf_zip_by_unit(self, records, rows_per_page=25, logo_path: str | Path | None = None,
                                  authorized_document_exceptions=frozenset(), generated_on=None):
-        self._ensure_ready(records, authorized_document_exceptions)
+        self._ensure_zip_ready(records, authorized_document_exceptions)
         logo = Path(logo_path) if logo_path else self.logo_path
         if not logo.exists():
             return generate_pdf_zip_by_unit(
@@ -307,13 +325,14 @@ class CertificadosIcbfService:
         return ReviewSession(records)
 
     def output_availability(self, records: pd.DataFrame) -> dict[str, Any]:
-        validation = validate_records(records)
         report_session = self.create_review_session(records)
-        selected = len(validation["active"])
-        ready = selected > 0 and not bool(validation["blocking"])
+        review = report_session.snapshot()
         return {
-            "ready": ready,
-            "selected": selected,
+            "ready": review["pdf_ready"],
+            "pdf_ready": review["pdf_ready"],
+            "zip_ready": review["zip_ready"],
+            "units_missing": review["units_missing"],
+            "selected": review["summary"]["registros_activos"],
             "duplicates": len(report_session.report_frame("duplicates")),
             "missing": len(report_session.report_frame("missing")),
             "email_text": build_email_text(records),
@@ -356,6 +375,13 @@ class CertificadosIcbfService:
         validation = validate_records(records, authorized_document_exceptions)
         if len(validation["active"]) == 0 or validation["blocking"]:
             raise ValueError("Los registros seleccionados todavía requieren revisión.")
+
+    def _ensure_zip_ready(self, records: pd.DataFrame, authorized_document_exceptions=frozenset()) -> None:
+        self._ensure_ready(records, authorized_document_exceptions)
+        active = normalize_edited_records(records)
+        active = active.loc[active["INCLUIR"]]
+        if active["UNIDADES"].map(is_missing).any():
+            raise ValueError("No se puede generar el ZIP por unidad porque existen registros incluidos sin UNIDADES.")
 
     @staticmethod
     def _blocking_reason(summary: dict[str, Any], selected: int) -> str:
