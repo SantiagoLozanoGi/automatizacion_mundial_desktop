@@ -85,4 +85,4 @@ La generación se bloquea hasta que una persona autoriza explícitamente cada do
 
 ### Paginación
 
-La cantidad de páginas puede diferir del resultado manual por la maquetación dinámica. La aceptación debe evaluar integridad de registros, legibilidad y ausencia de cortes, no solamente la cantidad exacta de páginas.
+La cantidad de páginas puede diferir del resultado manual por la maquetación dinámica. En los PDFs del ZIP, el valor interno `rows_per_page=25` no impone 25 registros por página: la cantidad real depende de la altura disponible y del contenido. La aceptación debe evaluar integridad de registros, legibilidad y ausencia de cortes, no solamente la cantidad exacta de páginas.

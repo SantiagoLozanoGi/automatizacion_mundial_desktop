@@ -74,7 +74,9 @@ La paginación se calcula por altura física de las filas. El cambio de unidad n
 
 ## ZIP por unidad
 
-Además de los requisitos del PDF general, todos los registros incluidos deben tener `UNIDADES`. Se crea un PDF por grupo de unidad normalizada dentro del ZIP. El servicio usa una capacidad objetivo de 25 filas por PDF, con paginación también basada en altura física.
+Además de los requisitos del PDF general, todos los registros incluidos deben tener `UNIDADES`. Se crea un PDF por grupo de unidad normalizada dentro del ZIP.
+
+Los PDFs del ZIP se paginan dinámicamente según la altura disponible. El generador recibe `rows_per_page=25` como parámetro interno de densidad para calcular la altura base de las filas; no es una regla de negocio ni un máximo de registros por página. La paginación final suma las alturas físicas de las filas y puede producir menos, exactamente o más de 25 registros por página según el contenido y el espacio disponible. Las unidades que necesitan más de dos líneas pueden aumentar la altura de su fila y reducir la cantidad de registros de esa página.
 
 Las entradas se nombran así:
 
