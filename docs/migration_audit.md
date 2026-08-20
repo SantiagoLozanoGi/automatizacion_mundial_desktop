@@ -1,5 +1,7 @@
 # Auditoría de migración: Streamlit a PySide6
 
+> **Nota histórica:** este documento describe la migración inicial. Las reglas y comportamientos funcionales pueden haber evolucionado después de esa etapa. La fuente de verdad funcional vigente es [Reglas de negocio: Certificados ICBF](business_rules.md).
+
 ## 1. Proyecto original analizado
 
 El prototipo original queda intacto en `automatizacion_certificados/` y no se modifica durante esta migración.

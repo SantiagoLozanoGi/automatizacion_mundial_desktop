@@ -1,24 +1,53 @@
 # Automatización Mundial
 
-Plataforma modular de escritorio para automatizar procesos de Mundial de Seguros. **Certificados ICBF** es actualmente el primer y único workflow implementado.
+Aplicación de escritorio para automatizar procesos de Mundial de Seguros. La versión actual es **0.6.2** y, por ahora, implementa un único workflow: **Certificados ICBF**.
 
-## Arquitectura
+## Funcionalidades actuales
 
-- `app/`: ventana principal, registro de workflows, logging y file IO comunes.
-- `config/`: nombre, identificador y resolución de recursos de la aplicación.
-- `workflows/certificados_icbf/`: vista, modelos y servicio exclusivos del flujo ICBF.
-- `workflows/certificados_icbf/legacy/`: lógica heredada protegida.
-- `assets/`: recursos visuales compartidos.
-- `tests/`: regresión, servicios, modelos, UI y registro modular.
-- `docs/adding_workflows.md`: guía para incorporar un flujo futuro.
+- Lectura y normalización de archivos Excel.
+- Filtrado de novedades de ingreso.
+- Revisión de registros, selección mediante `INCLUIR` y filtros de anomalías.
+- Detección de documentos duplicados y campos obligatorios faltantes.
+- Identificación y autorización manual de documentos no estándar.
+- Edición controlada de `DOCUMENTO`, `PRIMER APELLIDO`, `SEGUNDO APELLIDO` y `UNIDADES`.
+- Generación de PDF general y ZIP con un PDF por unidad.
+- Reportes Excel de duplicados y campos faltantes.
+- Texto sugerido para correo.
 
-La navegación e Inicio se generan desde `app/workflow_registry.py`. Cada vista se crea al entrar por primera vez y se conserva durante la sesión, evitando reprocesamiento y pérdida de estado.
+## Flujo general
 
-## Desarrollo
+```text
+Seleccionar Excel → Procesar → Revisar registros → Corregir / excluir / autorizar → Generar PDF o ZIP
+```
+
+Consulte [las reglas de negocio vigentes](docs/business_rules.md) antes de preparar un archivo o interpretar una validación.
+
+## Requisitos
+
+- Para desarrollo: Python 3.11 o superior y las dependencias de `requirements.txt` y `requirements-dev.txt`.
+- La distribución objetivo es Windows.
+- El usuario empresarial final usa el ejecutable ONEDIR; no necesita instalar Python cuando recibe la carpeta completa de distribución.
+
+## Ejecución de desarrollo
 
 ```powershell
 python -m pytest -q
 python main.py
 ```
 
-Las reglas de negocio ICBF permanecen dentro de su módulo. Las capacidades compartidas pertenecen a `app/`; ningún workflow debe depender de internals privados de otro.
+## Arquitectura breve
+
+- `app/`: ventana principal, registro de workflows, logging y operaciones de archivo compartidas.
+- `config/`: configuración y recursos corporativos.
+- `workflows/certificados_icbf/`: interfaz, modelos, servicio y lógica de Certificados ICBF.
+- `tests/`: pruebas automatizadas.
+
+## Documentación relacionada
+
+- [Reglas de negocio vigentes](docs/business_rules.md)
+- [Guía de usuario](docs/user_guide.md)
+- [Protocolo de pruebas de aceptación](docs/acceptance_testing.md)
+- [Build y distribución en Windows](docs/build_windows.md)
+- [Cómo agregar workflows](docs/adding_workflows.md)
+- [Auditoría histórica de migración](docs/migration_audit.md)
+- [Historial de cambios](CHANGELOG.md)

@@ -1,29 +1,72 @@
-# Build de Windows
+# Build y distribución en Windows
 
-Desde la raíz del proyecto, cree y active el entorno aislado:
+Este procedimiento produce una distribución ONEDIR para Windows.
+
+## Crear entorno
+
+Desde la raíz del repositorio:
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
+```
+
+## Instalar dependencias
+
+```powershell
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt -r requirements-dev.txt
 ```
 
-Ejecute la suite antes de empaquetar:
+## Ejecutar tests
 
 ```powershell
 python -m pytest -q
 ```
 
-Genere el paquete ONEDIR limpio:
+No continúe con una entrega si la suite presenta fallos.
+
+## Limpiar build anterior
+
+Si existen salidas previas de PyInstaller que se van a reemplazar, elimine únicamente las carpetas de salida del build anterior después de verificar su contenido y de conservar cualquier entrega que deba archivarse:
+
+```powershell
+Remove-Item -Recurse -Force build\AutomatizacionMundial
+Remove-Item -Recurse -Force dist_prueba_empresa\AutomatizacionMundial
+```
+
+## Ejecutar PyInstaller
 
 ```powershell
 python -m PyInstaller --noconfirm --clean --windowed --onedir --name AutomatizacionMundial --add-data "assets;assets" --exclude-module pytest --distpath dist_prueba_empresa main.py
 ```
 
-El ejecutable queda en `dist_prueba_empresa/AutomatizacionMundial/AutomatizacionMundial.exe`.
-Los directorios `.venv/`, `build/`, `dist/` y `dist_prueba_empresa/` están ignorados por Git.
+El comando incorpora el directorio `assets` requerido por la aplicación y excluye `pytest` del ejecutable.
 
-`pytest` se excluye porque el módulo heredado `test_processor.py` vive dentro de
-un paquete importable; la exclusión evita que la herramienta de pruebas forme
-parte del ejecutable.
+## Ruta del ejecutable
+
+```text
+dist_prueba_empresa/AutomatizacionMundial/AutomatizacionMundial.exe
+```
+
+## Verificación del ONEDIR
+
+1. Confirme que el ejecutable existe dentro de la carpeta ONEDIR.
+2. Confirme que la carpeta incluye los archivos y subcarpetas generados junto al ejecutable, incluidos los recursos empaquetados.
+3. Abra la aplicación desde esa carpeta y realice una prueba básica de carga, revisión y generación.
+
+## Crear ZIP de distribución
+
+Comprima la carpeta completa `AutomatizacionMundial`, no solo el ejecutable:
+
+```powershell
+Compress-Archive -Path dist_prueba_empresa\AutomatizacionMundial -DestinationPath dist_prueba_empresa\AutomatizacionMundial-Windows.zip
+```
+
+> El `.exe` no debe distribuirse solo. El usuario debe recibir la carpeta ONEDIR completa o un ZIP que contenga toda esa carpeta.
+
+## Prueba desde carpeta descomprimida
+
+Extraiga el ZIP en una carpeta temporal, abra `AutomatizacionMundial.exe` desde la carpeta extraída y compruebe que la aplicación inicia y puede procesar un archivo de prueba autorizado.
+
+Los directorios `.venv/`, `build/`, `dist/` y `dist_prueba_empresa/` están ignorados por Git.
