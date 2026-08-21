@@ -51,7 +51,7 @@ def test_validation_and_pdf():
     ])
     records, stats = read_and_clean_excel(source)
     assert stats == {"recibidos": 4, "ingresos": 3, "excluidos": 1}
-    assert set(records["SEGUNDO NOMBRE"]) == {"NA"}
+    assert set(records["SEGUNDO NOMBRE"]) == {""}
     assert records.loc[0, "DOCUMENTO"] == "0000000100"
     validation = validate_records(records)
     assert validation["blocking"] is True
@@ -91,6 +91,8 @@ def test_reports_only_ingresos_and_required_fields():
     assert "CAMPOS OBLIGATORIOS FALTANTES" in missing_row
     assert missing_row["DOCUMENTO"] == "0000000456"
     assert missing_row["PRIMER NOMBRE"] == ""
+    assert missing_row["SEGUNDO NOMBRE"] == ""
+    assert missing_row["SEGUNDO APELLIDO"] == ""
     assert missing_row["FECHA DE NACIMIENTO"] == ""
     assert missing_row["UNIDADES"] == ""
     missing = missing_row["CAMPOS OBLIGATORIOS FALTANTES"]

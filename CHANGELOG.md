@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.6.3] - 2026-08-21
+
+### Cambiado
+
+- Los campos opcionales `SEGUNDO NOMBRE` y `SEGUNDO APELLIDO` se conservan vacíos cuando no tienen información, en lugar de mostrarse como `NA`.
+
+### Corregido
+
+- Los marcadores de ausencia `NA`, `N/A`, `NONE`, `NAN` y `NULL` ya no aparecen como contenido en esos campos opcionales en tabla, PDFs, ZIPs, reportes ni DataFrame limpio.
+
 ## [0.6.2] - 2026-08-19
 
 ### Cambiado

@@ -61,7 +61,7 @@ COLUMN_ALIASES = {
     "TIPO DE NOVEDAD": ["TIPO DE NOVEDAD", "NOVEDAD"],
 }
 
-OPTIONAL_NA_FIELDS = {"SEGUNDO NOMBRE", "SEGUNDO APELLIDO"}
+OPTIONAL_EMPTY_FIELDS = {"SEGUNDO NOMBRE", "SEGUNDO APELLIDO"}
 REQUIRED_FIELDS = [
     "PRIMER NOMBRE",
     "DOCUMENTO",
@@ -282,8 +282,8 @@ def read_and_clean_excel(file_or_buffer: object) -> tuple[pd.DataFrame, dict[str
         else:
             cleaned[target] = data[source].map(_text)
 
-    for field in OPTIONAL_NA_FIELDS:
-        cleaned[field] = cleaned[field].map(lambda value: "NA" if is_missing(value) else value)
+    for field in OPTIONAL_EMPTY_FIELDS:
+        cleaned[field] = cleaned[field].map(lambda value: "" if is_missing(value) else value)
 
     cleaned["_FILA_ORIGEN"] = data.index.to_series().map(lambda value: int(value) + header_row + 2)
     cleaned = cleaned[EDITABLE_COLUMNS].reset_index(drop=True)
@@ -338,8 +338,8 @@ def normalize_edited_records(records: pd.DataFrame) -> pd.DataFrame:
             result[column] = result[column].map(format_date)
         else:
             result[column] = result[column].map(_text)
-    for field in OPTIONAL_NA_FIELDS:
-        result[field] = result[field].map(lambda value: "NA" if is_missing(value) else value)
+    for field in OPTIONAL_EMPTY_FIELDS:
+        result[field] = result[field].map(lambda value: "" if is_missing(value) else value)
     return result[EDITABLE_COLUMNS].reset_index(drop=True)
 
 

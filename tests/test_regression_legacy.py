@@ -18,6 +18,7 @@ from workflows.certificados_icbf.legacy.certificate_processor import (
     format_date,
     generate_pdf,
     generate_pdf_zip_by_unit,
+    normalize_edited_records,
     normalize_unit_key,
     read_and_clean_excel,
     validate_records,
@@ -111,7 +112,7 @@ def test_validation_and_pdf():
     ])
     records, stats = read_and_clean_excel(source)
     assert stats == {"recibidos": 4, "ingresos": 3, "excluidos": 1}
-    assert set(records["SEGUNDO NOMBRE"]) == {"NA"}
+    assert set(records["SEGUNDO NOMBRE"]) == {""}
     assert records.loc[0, "DOCUMENTO"] == "0000000100"
     validation = validate_records(records)
     assert validation["blocking"] is True
@@ -150,6 +151,8 @@ def test_reports_only_ingresos_and_required_fields():
     assert "CAMPOS OBLIGATORIOS FALTANTES" in missing_row
     assert missing_row["DOCUMENTO"] == "0000000456"
     assert missing_row["PRIMER NOMBRE"] == ""
+    assert missing_row["SEGUNDO NOMBRE"] == ""
+    assert missing_row["SEGUNDO APELLIDO"] == ""
     assert missing_row["FECHA DE NACIMIENTO"] == ""
     assert missing_row["UNIDADES"] == ""
     missing = missing_row["CAMPOS OBLIGATORIOS FALTANTES"]
@@ -170,6 +173,59 @@ def test_accepts_second_surname_when_first_surname_missing():
 
     assert len(validation["missing_report"]) == 0
     assert validation["blocking"] is False
+
+
+def test_optional_name_fields_normalize_missing_tokens_to_empty_and_keep_values():
+    source = build_source([
+        ["Ana", value, "Pérez", value, str(index + 1), "01/01/2010", "Bogotá", "INGRESO"]
+        for index, value in enumerate([None, "NA", "N/A", "NONE", "NAN", "NULL", "MARIA"])
+    ])
+
+    records, _ = read_and_clean_excel(source)
+
+    assert records["SEGUNDO NOMBRE"].tolist() == ["", "", "", "", "", "", "MARIA"]
+    assert records["SEGUNDO APELLIDO"].tolist() == ["", "", "", "", "", "", "MARIA"]
+
+    edited = records.copy()
+    edited.loc[0, "SEGUNDO NOMBRE"] = "NULL"
+    edited.loc[1, "SEGUNDO APELLIDO"] = "NAN"
+    normalized = normalize_edited_records(edited)
+
+    assert normalized.loc[0, "SEGUNDO NOMBRE"] == ""
+    assert normalized.loc[1, "SEGUNDO APELLIDO"] == ""
+
+
+def test_empty_optional_name_fields_render_blank_in_pdf_and_zip():
+    records, _ = read_and_clean_excel(build_source([
+        ["Ana", "NA", "Pérez", "N/A", "123", "01/01/2010", "Bogotá", "INGRESO"],
+    ]))
+
+    pdf_text = "\n".join(
+        page.extract_text() or "" for page in PdfReader(BytesIO(generate_pdf(records))).pages
+    )
+    with zipfile.ZipFile(BytesIO(generate_pdf_zip_by_unit(records))) as archive:
+        zip_text = "\n".join(
+            page.extract_text() or ""
+            for page in PdfReader(BytesIO(archive.read(archive.namelist()[0]))).pages
+        )
+
+    assert records.loc[0, "SEGUNDO NOMBRE"] == ""
+    assert records.loc[0, "SEGUNDO APELLIDO"] == ""
+    assert "\nNA\n" not in pdf_text
+    assert "\nNA\n" not in zip_text
+
+
+def test_empty_document_and_both_surnames_remain_blocking():
+    records, _ = read_and_clean_excel(build_source([
+        ["Ana", None, "Pérez", None, "", "01/01/2010", "Bogotá", "INGRESO"],
+        ["Eva", None, None, None, "456", "01/01/2010", "Bogotá", "INGRESO"],
+    ]))
+
+    validation = validate_records(records)
+
+    assert len(validation["missing_document"]) == 1
+    assert len(validation["missing_report"]) == 2
+    assert validation["blocking"] is True
 
 
 def test_invalid_document_blocks_pdf():

@@ -52,7 +52,7 @@ La comparación normaliza mayúsculas/minúsculas, acentos y espacios. `INGRES0`
 
 En los registros incluidos deben existir `PRIMER NOMBRE`, `DOCUMENTO`, `FECHA DE NACIMIENTO` y al menos uno entre `PRIMER APELLIDO` o `SEGUNDO APELLIDO`. Los valores vacíos y marcadores como `NA`, `N/A`, `NONE`, `NAN` o `NULL` se consideran faltantes.
 
-`SEGUNDO NOMBRE` y `SEGUNDO APELLIDO` pueden quedar como `NA`.
+`SEGUNDO NOMBRE` y `SEGUNDO APELLIDO` son opcionales. Cuando no contienen información, la herramienta los normaliza y conserva como campos vacíos. Los marcadores de entrada `NA`, `N/A`, `N.A.`, `NONE`, `NAN` y `NULL` se interpretan como ausencia de dato para estos dos campos.
 
 > `UNIDADES` **NO** es obligatoria para generar el PDF general.
 
