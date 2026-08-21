@@ -32,7 +32,7 @@ Desmarque `INCLUIR` para excluir una fila temporalmente. Puede volver a marcarla
 
 ## 8. Editar campos
 
-Haga doble clic en una celda para editar únicamente `DOCUMENTO`, `PRIMER APELLIDO`, `SEGUNDO APELLIDO` y `UNIDADES`. Después de editar, la validación se actualiza.
+Haga doble clic en una celda para editar únicamente `DOCUMENTO`, `PRIMER APELLIDO`, `SEGUNDO APELLIDO`, `FECHA DE NACIMIENTO` y `UNIDADES`. Después de editar, la validación se actualiza. La fecha de nacimiento sigue siendo obligatoria para generar certificados.
 
 ## 9. Autorizar un documento no estándar
 

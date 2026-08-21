@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.6.4] - 2026-08-21
+
+### Añadido
+
+- Edición manual de `FECHA DE NACIMIENTO` desde la tabla de revisión.
+
+### Mantenido
+
+- `FECHA DE NACIMIENTO` continúa siendo un campo obligatorio para generar PDF y ZIP.
+- Las fechas editadas utilizan la normalización existente al formato `dd/mm/aaaa` cuando son reconocibles.
+
 ## [0.6.3] - 2026-08-21
 
 ### Cambiado

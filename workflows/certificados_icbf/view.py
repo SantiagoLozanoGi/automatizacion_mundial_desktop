@@ -215,7 +215,7 @@ class CertificadosIcbfView(QtWidgets.QWidget):
         filter_row.addStretch()
         review_layout.addLayout(filter_row)
         edit_help = QtWidgets.QLabel(
-            "Campos editables: documento, primer apellido, segundo apellido y unidades. "
+            "Campos editables: documento, primer apellido, segundo apellido, fecha de nacimiento y unidades. "
             "Haz doble clic sobre una celda para corregirla."
         )
         edit_help.setWordWrap(True)

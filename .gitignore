@@ -3,9 +3,12 @@ __pycache__/
 *.pyo
 *.pyd
 .venv/
+.venv-build/
 .pytest_cache/
 *.log
 build/
 dist/
 dist_prueba_empresa/
+build_prueba_limpia/
+dist_prueba_limpia/
 *.spec

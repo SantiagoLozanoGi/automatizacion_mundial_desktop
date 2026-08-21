@@ -25,11 +25,14 @@ from workflows.certificados_icbf.legacy.certificate_processor import (
 )
 
 
-EDITABLE_FIELDS = frozenset({"DOCUMENTO", "PRIMER APELLIDO", "SEGUNDO APELLIDO", "UNIDADES"})
+EDITABLE_FIELDS = frozenset({
+    "DOCUMENTO", "PRIMER APELLIDO", "SEGUNDO APELLIDO", "FECHA DE NACIMIENTO", "UNIDADES",
+})
 _LOG_FIELD_NAMES = {
     "DOCUMENTO": "document",
     "PRIMER APELLIDO": "first_surname",
     "SEGUNDO APELLIDO": "second_surname",
+    "FECHA DE NACIMIENTO": "birth_date",
     "UNIDADES": "units",
 }
 logger = get_logger("certificados_icbf")

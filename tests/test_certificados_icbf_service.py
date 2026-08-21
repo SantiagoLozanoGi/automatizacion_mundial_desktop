@@ -282,6 +282,41 @@ def test_service_blocks_certificate_outputs_until_records_are_ready() -> None:
         raise AssertionError("El service no debía generar un PDF bloqueado.")
 
 
+def test_manual_date_edit_normalizes_pdf_and_zip_and_empty_date_blocks() -> None:
+    workflow_service = CertificadosIcbfService()
+    records, _ = workflow_service.read_and_clean_excel(build_source())
+    records.loc[0, "FECHA DE NACIMIENTO"] = ""
+
+    assert workflow_service.output_availability(records)["pdf_ready"] is False
+    corrected = workflow_service.update_editable_field(
+        records, 0, "FECHA DE NACIMIENTO", "1/8/2023"
+    )
+    assert corrected.loc[0, "FECHA DE NACIMIENTO"] == "01/08/2023"
+    assert workflow_service.output_availability(corrected)["pdf_ready"] is True
+
+    pdf_text = "\n".join(
+        page.extract_text() or ""
+        for page in PdfReader(BytesIO(workflow_service.generate_pdf(corrected))).pages
+    )
+    archive = workflow_service.generate_pdf_zip_by_unit(corrected)
+    with zipfile.ZipFile(BytesIO(archive)) as zipped:
+        zip_text = "\n".join(
+            page.extract_text() or ""
+            for page in PdfReader(BytesIO(zipped.read(zipped.namelist()[0]))).pages
+        )
+    assert "01/08/2023" in pdf_text
+    assert "01/08/2023" in zip_text
+
+    emptied = workflow_service.update_editable_field(
+        corrected, 0, "FECHA DE NACIMIENTO", ""
+    )
+    validation = workflow_service.validate_records(emptied)
+    assert validation["blocking"] is True
+    assert "FECHA DE NACIMIENTO" in validation["missing_report"].iloc[0][
+        "CAMPOS OBLIGATORIOS FALTANTES"
+    ]
+
+
 def test_review_maps_missing_fields_to_original_source_row() -> None:
     workflow_service = CertificadosIcbfService()
     records, _ = workflow_service.read_and_clean_excel(build_source())

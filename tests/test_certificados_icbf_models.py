@@ -170,11 +170,30 @@ def edit(model: RecordsTableModel, row: int, column: str, value: str) -> bool:
 def test_only_authorized_business_fields_are_editable() -> None:
     model = RecordsTableModel(editable_records())
 
-    for column in ("DOCUMENTO", "PRIMER APELLIDO", "SEGUNDO APELLIDO", "UNIDADES"):
+    for column in ("DOCUMENTO", "PRIMER APELLIDO", "SEGUNDO APELLIDO", "FECHA DE NACIMIENTO", "UNIDADES"):
         assert model.flags(model.index(0, model._columns.index(column))) & QtCore.Qt.ItemIsEditable
-    for column in ("PRIMER NOMBRE", "SEGUNDO NOMBRE", "FECHA DE NACIMIENTO", "_FILA_ORIGEN"):
+    for column in ("PRIMER NOMBRE", "SEGUNDO NOMBRE", "_FILA_ORIGEN"):
         assert not model.flags(model.index(0, model._columns.index(column))) & QtCore.Qt.ItemIsEditable
         assert not edit(model, 0, column, "cambio no autorizado")
+
+
+def test_date_is_editable_normalized_and_remains_required() -> None:
+    records = editable_records()
+    records.loc[0, "DOCUMENTO"] = "0000000789"
+    records.loc[0, "PRIMER APELLIDO"] = "Gómez"
+    records.loc[0, "FECHA DE NACIMIENTO"] = ""
+    model = RecordsTableModel(records)
+
+    assert model.review["ready"] is False
+    assert edit(model, 0, "FECHA DE NACIMIENTO", "1/8/2023")
+    assert model.records.loc[0, "FECHA DE NACIMIENTO"] == "01/08/2023"
+    assert model.review["ready"] is True
+
+    assert edit(model, 0, "FECHA DE NACIMIENTO", "")
+    assert model.records.loc[0, "FECHA DE NACIMIENTO"] == ""
+    assert "missing" in model.categories_for_row(0)
+    assert model.review["ready"] is False
+    assert "FECHA DE NACIMIENTO" in model.anomalies_for_row(0)[0]
 
 
 def test_valid_document_and_first_surname_edits_clear_anomalies() -> None:

@@ -52,6 +52,8 @@ La comparación normaliza mayúsculas/minúsculas, acentos y espacios. `INGRES0`
 
 En los registros incluidos deben existir `PRIMER NOMBRE`, `DOCUMENTO`, `FECHA DE NACIMIENTO` y al menos uno entre `PRIMER APELLIDO` o `SEGUNDO APELLIDO`. Los valores vacíos y marcadores como `NA`, `N/A`, `NONE`, `NAN` o `NULL` se consideran faltantes.
 
+`FECHA DE NACIMIENTO` es obligatoria para generar certificados, pero puede corregirse o completarse manualmente durante la revisión. Las fechas editadas se normalizan al formato `dd/mm/aaaa` cuando son reconocibles. Actualmente, un texto no vacío que no sea una fecha reconocible se conserva como fue escrito y no se bloquea por la regla de obligatoriedad; validar el formato calendario sería una mejora futura separada.
+
 `SEGUNDO NOMBRE` y `SEGUNDO APELLIDO` son opcionales. Cuando no contienen información, la herramienta los normaliza y conserva como campos vacíos. Los marcadores de entrada `NA`, `N/A`, `N.A.`, `NONE`, `NAN` y `NULL` se interpretan como ausencia de dato para estos dos campos.
 
 > `UNIDADES` **NO** es obligatoria para generar el PDF general.
